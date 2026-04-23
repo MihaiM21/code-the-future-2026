@@ -1,22 +1,26 @@
 import { useConfigStore, useAlertStore } from "../store";
 import { useTelemetryStore } from "../store";
+import { useAuthStore } from "../store/auth";
 import { sendCommand } from "../services/serial";
+import AutonomyQueue from "../components/AutonomyQueue";
+import type { AutonomyLevel } from "../types";
 import {
   ShieldCheck, ShieldAlert, Sliders, Bell,
-  Wind, Zap, ChevronRight, Trash2
+  Wind, Zap, ChevronRight, Trash2, Lock
 } from "lucide-react";
 
-const autonomyLabels = [
-  { level: 0, name: "MANUAL",    desc: "No autonomous actions. All control is manual.", color: "var(--text-muted)" },
-  { level: 1, name: "ADVISORY",  desc: "System advises but does not act.", color: "var(--accent-cyan)" },
-  { level: 2, name: "SEMI-AUTO", desc: "System acts on safety events only.", color: "var(--accent-amber)" },
-  { level: 3, name: "FULL-AUTO", desc: "System acts on all safety & performance events.", color: "var(--accent-red)" },
+const autonomyLabels: Array<{ level: AutonomyLevel; name: string; desc: string; color: string }> = [
+  { level: 1, name: "ADVISORY", desc: "Only notifies authorized users with ranked suggestions.", color: "var(--accent-cyan)" },
+  { level: 2, name: "REVIEW", desc: "Authorized users can edit, accept, or reject a suggestion.", color: "var(--accent-amber)" },
+  { level: 3, name: "SUPERVISED", desc: "Safety actions can execute automatically; performance stays reviewed.", color: "var(--accent-amber)" },
+  { level: 4, name: "INDEPENDENT", desc: "The app executes approved rules without human approval.", color: "var(--accent-red)" },
 ];
 
-function AutonomySelector() {
+function AutonomySelector({ canDecide }: { canDecide: boolean }) {
   const { autonomyLevel, setAutonomyLevel } = useConfigStore();
 
-  const handleSet = async (n: number) => {
+  const handleSet = async (n: AutonomyLevel) => {
+    if (!canDecide) return;
     setAutonomyLevel(n);
     await sendCommand(`SET_AUTONOMY:${n}`);
   };
@@ -31,11 +35,12 @@ function AutonomySelector() {
         {autonomyLabels.map((a) => (
           <button
             key={a.level}
-            className={`flex items-center gap-3 rounded-[10px] border bg-[var(--bg-card)] px-3.5 py-3 text-left transition-all duration-150 ${autonomyLevel === a.level ? "" : "text-[var(--text-secondary)] hover:bg-white/[0.03]"}`}
+            className={`flex items-center gap-3 rounded-[10px] border bg-[var(--bg-card)] px-3.5 py-3 text-left transition-all duration-150 ${autonomyLevel === a.level ? "" : "text-[var(--text-secondary)] hover:bg-white/[0.03]"} ${!canDecide ? "cursor-not-allowed opacity-65" : ""}`}
             style={autonomyLevel === a.level
               ? { borderColor: a.color, color: a.color, background: "rgba(255,255,255,0.03)" }
               : { borderColor: "var(--border)" }}
             onClick={() => handleSet(a.level)}
+            disabled={!canDecide}
           >
             <span
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[0.9rem] font-bold"
@@ -55,12 +60,14 @@ function AutonomySelector() {
   );
 }
 
-function SafetyRules() {
+function SafetyRules({ canDecide }: { canDecide: boolean }) {
   const {
     fanThreshold, setFanThreshold,
+    exhaustTempHigh, setExhaustTempHigh,
     batteryLowV, setBatteryLowV,
     rpmLimit, setRpmLimit,
     autoFanEnabled, toggleAutoFan,
+    autoExhaustCleanupEnabled, toggleAutoExhaustCleanup,
     autoBatteryAlertEnabled, toggleAutoBatteryAlert,
   } = useConfigStore();
 
@@ -85,11 +92,13 @@ function SafetyRules() {
               type="range" min={75} max={110} value={fanThreshold}
               onChange={(e) => setFanThreshold(+e.target.value)}
               className="range-input"
+              disabled={!canDecide}
             />
             <span className="mono min-w-12 text-right text-[0.8rem] text-[var(--text-secondary)]">{fanThreshold}°C</span>
             <button
-              className={`rounded-full border px-2.5 py-1 text-[0.7rem] font-bold tracking-[0.05em] ${autoFanEnabled ? "border-[#06d6a04d] bg-[var(--accent-green-dim)] text-[var(--accent-green)]" : "border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-muted)]"}`}
+              className={`rounded-full border px-2.5 py-1 text-[0.7rem] font-bold tracking-[0.05em] ${autoFanEnabled ? "border-[#06d6a04d] bg-[var(--accent-green-dim)] text-[var(--accent-green)]" : "border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-muted)]"} ${!canDecide ? "cursor-not-allowed opacity-65" : ""}`}
               onClick={toggleAutoFan}
+              disabled={!canDecide}
             >
               {autoFanEnabled ? "ON" : "OFF"}
             </button>
@@ -111,13 +120,43 @@ function SafetyRules() {
               type="range" min={10} max={14} step={0.1} value={batteryLowV}
               onChange={(e) => setBatteryLowV(+e.target.value)}
               className="range-input"
+              disabled={!canDecide}
             />
             <span className="mono min-w-12 text-right text-[0.8rem] text-[var(--text-secondary)]">{batteryLowV.toFixed(1)}V</span>
             <button
-              className={`rounded-full border px-2.5 py-1 text-[0.7rem] font-bold tracking-[0.05em] ${autoBatteryAlertEnabled ? "border-[#06d6a04d] bg-[var(--accent-green-dim)] text-[var(--accent-green)]" : "border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-muted)]"}`}
+              className={`rounded-full border px-2.5 py-1 text-[0.7rem] font-bold tracking-[0.05em] ${autoBatteryAlertEnabled ? "border-[#06d6a04d] bg-[var(--accent-green-dim)] text-[var(--accent-green)]" : "border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-muted)]"} ${!canDecide ? "cursor-not-allowed opacity-65" : ""}`}
               onClick={toggleAutoBatteryAlert}
+              disabled={!canDecide}
             >
               {autoBatteryAlertEnabled ? "ON" : "OFF"}
+            </button>
+          </div>
+        </div>
+
+        <div className="my-1 h-px bg-[var(--border)]" />
+
+        <div className="flex items-center gap-3 py-2">
+          <div className="flex flex-1 items-start gap-2.5 text-[var(--text-muted)]">
+            <ShieldCheck size={14} />
+            <div>
+              <div className="text-[0.85rem] font-medium text-[var(--text-primary)]">Exhaust Clean-Out</div>
+              <div className="mt-0.5 text-[0.72rem] text-[var(--text-muted)]">Suggest throttle enrichment when exhaust temperature spikes</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="range" min={450} max={900} step={10} value={exhaustTempHigh}
+              onChange={(e) => setExhaustTempHigh(+e.target.value)}
+              className="range-input"
+              disabled={!canDecide}
+            />
+            <span className="mono min-w-12 text-right text-[0.8rem] text-[var(--text-secondary)]">{exhaustTempHigh}°C</span>
+            <button
+              className={`rounded-full border px-2.5 py-1 text-[0.7rem] font-bold tracking-[0.05em] ${autoExhaustCleanupEnabled ? "border-[#06d6a04d] bg-[var(--accent-green-dim)] text-[var(--accent-green)]" : "border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-muted)]"} ${!canDecide ? "cursor-not-allowed opacity-65" : ""}`}
+              onClick={toggleAutoExhaustCleanup}
+              disabled={!canDecide}
+            >
+              {autoExhaustCleanupEnabled ? "ON" : "OFF"}
             </button>
           </div>
         </div>
@@ -137,6 +176,7 @@ function SafetyRules() {
               type="range" min={6000} max={12000} step={100} value={rpmLimit}
               onChange={(e) => setRpmLimit(+e.target.value)}
               className="range-input"
+              disabled={!canDecide}
             />
             <span className="mono min-w-12 text-right text-[0.8rem] text-[var(--text-secondary)]">{rpmLimit.toLocaleString()}</span>
           </div>
@@ -146,8 +186,18 @@ function SafetyRules() {
   );
 }
 
-function ManualOverride() {
+function ManualOverride({ canDecide }: { canDecide: boolean }) {
   const current = useTelemetryStore((s) => s.current);
+  const handleFan = async () => {
+    if (!canDecide) return;
+    await sendCommand(current?.fan_active ? "FAN_OFF" : "FAN_ON");
+  };
+
+  const handleDrs = async () => {
+    if (!canDecide) return;
+    await sendCommand(current?.drs_active ? "DRS_CLOSE" : "DRS_OPEN");
+  };
+
   return (
     <div className="card">
       <div className="card-header-row">
@@ -156,15 +206,17 @@ function ManualOverride() {
       </div>
       <div className="grid grid-cols-2 gap-2.5">
         <button
-          className={`flex flex-col items-center gap-2 rounded-[10px] border px-4 py-4 text-[0.8rem] font-semibold transition-all duration-150 ${current?.fan_active ? "border-[#06d6a04d] bg-[var(--accent-green-dim)] text-[var(--accent-green)]" : "border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-secondary)] hover:border-[#06d6a04d] hover:text-[var(--accent-green)]"}`}
-          onClick={() => sendCommand(current?.fan_active ? "FAN_OFF" : "FAN_ON")}
+          className={`flex flex-col items-center gap-2 rounded-[10px] border px-4 py-4 text-[0.8rem] font-semibold transition-all duration-150 ${current?.fan_active ? "border-[#06d6a04d] bg-[var(--accent-green-dim)] text-[var(--accent-green)]" : "border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-secondary)] hover:border-[#06d6a04d] hover:text-[var(--accent-green)]"} ${!canDecide ? "cursor-not-allowed opacity-65" : ""}`}
+          onClick={handleFan}
+          disabled={!canDecide}
         >
           <Wind size={20} />
           <span>FAN {current?.fan_active ? "ON" : "OFF"}</span>
         </button>
         <button
-          className={`flex flex-col items-center gap-2 rounded-[10px] border px-4 py-4 text-[0.8rem] font-semibold transition-all duration-150 ${current?.drs_active ? "border-[#00d2ff4d] bg-[var(--accent-cyan-dim)] text-[var(--accent-cyan)]" : "border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-secondary)] hover:border-[#00d2ff4d] hover:text-[var(--accent-cyan)]"}`}
-          onClick={() => sendCommand(current?.drs_active ? "DRS_CLOSE" : "DRS_OPEN")}
+          className={`flex flex-col items-center gap-2 rounded-[10px] border px-4 py-4 text-[0.8rem] font-semibold transition-all duration-150 ${current?.drs_active ? "border-[#00d2ff4d] bg-[var(--accent-cyan-dim)] text-[var(--accent-cyan)]" : "border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-secondary)] hover:border-[#00d2ff4d] hover:text-[var(--accent-cyan)]"} ${!canDecide ? "cursor-not-allowed opacity-65" : ""}`}
+          onClick={handleDrs}
+          disabled={!canDecide}
         >
           <ChevronRight size={20} />
           <span>DRS {current?.drs_active ? "OPEN" : "CLOSED"}</span>
@@ -206,13 +258,22 @@ function AlertLog() {
 }
 
 export default function Safety() {
+  const isAuthorized = useAuthStore((s) => s.isAuthorized);
+
   return (
     <div className="page-content h-full">
+      {!isAuthorized && (
+        <div className="mb-3.5 flex items-center gap-2 rounded-[10px] border border-[#ffb70333] bg-[var(--accent-amber-dim)] px-3.5 py-2.5 text-[0.82rem] font-medium text-[var(--accent-amber)]">
+          <Lock size={14} />
+          Viewing mode: only Authorized Users can change safety decisions and thresholds.
+        </div>
+      )}
       <div className="grid h-full gap-3.5 xl:grid-cols-2">
         <div className="flex flex-col gap-3.5">
-          <AutonomySelector />
-          <SafetyRules />
-          <ManualOverride />
+          <AutonomySelector canDecide={isAuthorized} />
+          <SafetyRules canDecide={isAuthorized} />
+          <AutonomyQueue />
+          <ManualOverride canDecide={isAuthorized} />
         </div>
         <div className="flex min-h-0 flex-col gap-3.5">
           <AlertLog />

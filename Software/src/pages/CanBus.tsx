@@ -15,15 +15,14 @@ interface CanFrame {
 // Simulated CAN signal decode map
 const CAN_DECODE: Record<string, { signal: string; decode: (d: number[]) => string }> = {
   "0x200": { signal: "ENGINE_RPM",   decode: (d) => `${((d[0] << 8) | d[1])} rpm` },
-  "0x210": { signal: "WHEEL_SPEED",  decode: (d) => `${(((d[0] << 8) | d[1]) / 10).toFixed(1)} km/h` },
-  "0x300": { signal: "ENGINE_TEMP",  decode: (d) => `${d[0] - 40}°C` },
-  "0x310": { signal: "OIL_TEMP",     decode: (d) => `${d[0] - 40}°C` },
-  "0x400": { signal: "THROTTLE",     decode: (d) => `${((d[0] / 255) * 100).toFixed(1)}%` },
-  "0x401": { signal: "BRAKE",        decode: (d) => `${((d[0] / 255) * 100).toFixed(1)}%` },
-  "0x500": { signal: "BATTERY_VOLT", decode: (d) => `${(((d[0] << 8) | d[1]) / 100).toFixed(2)}V` },
-  "0x600": { signal: "FUEL_LEVEL",   decode: (d) => `${d[0]}%` },
-  "0x700": { signal: "DRS_STATUS",   decode: (d) => (d[0] === 1 ? "OPEN" : "CLOSED") },
-  "0x800": { signal: "FAN_CTRL",     decode: (d) => `${d[0]}%` },
+  "0x300": { signal: "AIR_TEMP",     decode: (d) => `${(((d[0] << 8) | d[1]) / 10).toFixed(1)}°C` },
+  "0x310": { signal: "AIR_QUALITY",  decode: (d) => `${d[0]}` },
+  "0x320": { signal: "PRESSURE",     decode: (d) => `${(((d[0] << 8) | d[1]) / 10).toFixed(1)} hPa` },
+  "0x400": { signal: "THROTTLE",     decode: (d) => (d[0] === 1 ? "ON" : "OFF") },
+  "0x401": { signal: "BRAKE",        decode: (d) => (d[0] === 1 ? "ON" : "OFF") },
+  "0x500": { signal: "G_LAT",        decode: (d) => `${(((d[0] << 8) | d[1]) / 100).toFixed(2)}G` },
+  "0x501": { signal: "G_LON",        decode: (d) => `${(((d[0] << 8) | d[1]) / 100).toFixed(2)}G` },
+  "0x502": { signal: "G_VERT",       decode: (d) => `${(((d[0] << 8) | d[1]) / 100).toFixed(2)}G` },
 };
 
 const CAN_IDS = Object.keys(CAN_DECODE);
@@ -33,15 +32,14 @@ function generateCanFrame(id: string, current: ReturnType<typeof useTelemetrySto
   const data: number[] = Array(8).fill(0);
   switch (id) {
     case "0x200": data[0] = (current.rpm >> 8) & 0xff; data[1] = current.rpm & 0xff; break;
-    case "0x210": { const sp = Math.round(current.speed * 10); data[0] = (sp >> 8) & 0xff; data[1] = sp & 0xff; break; }
-    case "0x300": data[0] = Math.round(current.temp_engine) + 40; break;
-    case "0x310": data[0] = Math.round(current.temp_oil) + 40; break;
-    case "0x400": data[0] = Math.round((current.throttle / 100) * 255); break;
-    case "0x401": data[0] = Math.round((current.brake / 100) * 255); break;
-    case "0x500": { const v = Math.round(current.battery_voltage * 100); data[0] = (v >> 8) & 0xff; data[1] = v & 0xff; break; }
-    case "0x600": data[0] = Math.round(current.fuel_level); break;
-    case "0x700": data[0] = current.drs_active ? 1 : 0; break;
-    case "0x800": data[0] = current.fan_active ? 100 : 0; break;
+    case "0x300": { const t = Math.round(current.air_temp * 10); data[0] = (t >> 8) & 0xff; data[1] = t & 0xff; break; }
+    case "0x310": data[0] = Math.round(current.air_quality); break;
+    case "0x320": { const p = Math.round(current.pressure * 10); data[0] = (p >> 8) & 0xff; data[1] = p & 0xff; break; }
+    case "0x400": data[0] = current.throttle; break;
+    case "0x401": data[0] = current.brake; break;
+    case "0x500": { const g = Math.round(current.g_lat * 100); data[0] = (g >> 8) & 0xff; data[1] = g & 0xff; break; }
+    case "0x501": { const g = Math.round(current.g_lon * 100); data[0] = (g >> 8) & 0xff; data[1] = g & 0xff; break; }
+    case "0x502": { const g = Math.round(current.g_vert * 100); data[0] = (g >> 8) & 0xff; data[1] = g & 0xff; break; }
   }
   return data;
 }
