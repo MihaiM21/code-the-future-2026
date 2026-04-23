@@ -1,0 +1,19 @@
+# Frontend (Vite/React)
+Software/node_modules/
+Software/dist/
+Software/.env
+Software/.env.*
+!Software/.env.example
+
+# Tauri / Rust build artifacts
+Software/src-tauri/target/
+
+# Package manager logs
+Software/npm-debug.log*
+Software/yarn-debug.log*
+Software/yarn-error.log*
+Software/pnpm-debug.log*
+
+# OS artifacts
+.DS_Store
+Thumbs.db
