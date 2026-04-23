@@ -210,7 +210,7 @@ export default function Settings() {
                 {history.slice(-20).reverse().map((f, i) => (
                   <div key={i} className="flex gap-2.5">
                     <span className="shrink-0 text-[var(--text-muted)]">{new Date(f.ts).toLocaleTimeString()}</span>
-                    {JSON.stringify({ rpm: f.rpm, spd: f.speed, thr: f.throttle, brk: f.brake })}
+                    {JSON.stringify({ rpm: f.rpm, thr: f.throttle, brk: f.brake })}
                   </div>
                 ))}
                 {history.length === 0 && <span style={{ color: "var(--text-muted)" }}>Waiting for frames...</span>}

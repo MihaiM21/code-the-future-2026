@@ -88,44 +88,21 @@ export function startDemo() {
   demoIntervalId = setInterval(() => {
     t += 0.1;
     const rpm = 4000 + 4000 * Math.abs(Math.sin(t * 0.5));
-    const speed = 80 + 130 * Math.abs(Math.sin(t * 0.3));
-    const throttle = 40 + 60 * Math.abs(Math.sin(t * 0.5));
-    const brake = throttle < 50 ? 80 - throttle : 0;
-    const gear = Math.min(8, Math.max(1, Math.round(speed / 40)));
-    const temp_engine = 88 + 12 * Math.abs(Math.sin(t * 0.05));
-    const temp_water = 82 + 8 * Math.abs(Math.sin(t * 0.04));
-    const temp_oil = 95 + 15 * Math.abs(Math.sin(t * 0.03));
-    const lapTime = (t % 90) * 1000;
+    const throttle = Math.sin(t * 0.5) > 0 ? 1 : 0;
+    const brake = throttle === 0 && Math.sin(t * 0.3) > 0.5 ? 1 : 0;
 
     const frame: TelemetryFrame = {
       ts: Date.now(),
-      rpm: Math.round(rpm),
-      speed: Math.round(speed),
-      throttle: Math.round(throttle),
-      brake: Math.round(brake),
-      gear,
-      temp_engine: +temp_engine.toFixed(1),
-      temp_water: +temp_water.toFixed(1),
-      temp_oil: +temp_oil.toFixed(1),
-      temp_ambient: 28.5,
-      battery_voltage: 12.6 + 0.4 * Math.sin(t * 0.1),
-      battery_current: 35 + 20 * Math.abs(Math.sin(t * 0.2)),
-      battery_fault: false,
-      fuel_level: Math.max(0, 80 - t * 0.05),
-      lap_time: lapTime,
-      lap_number: demoLapNumber,
+      air_temp: 22 + 5 * Math.sin(t * 0.1),
+      air_quality: 45 + 20 * Math.abs(Math.sin(t * 0.2)),
+      pressure: 1013 + 2 * Math.sin(t * 0.05),
       g_lat: 2.2 * Math.sin(t * 0.7),
       g_lon: 1.5 * Math.sin(t * 0.5),
       g_vert: 1.0 + 0.3 * Math.sin(t * 2),
-      can_errors: 0,
-      autonomy_level: 1,
-      fan_active: temp_engine > 96,
-      drs_active: speed > 180,
-      alerts: [],
+      throttle,
+      brake,
+      rpm: Math.round(rpm),
     };
-
-    demoLapFrames.push(frame);
-    useTelemetryStore.getState().pushFrame(frame);
     lastFrameTs = Date.now();
     useSerialStore.getState().setLastFrameAge(0);
     useSerialStore.getState().setBytesPerSec(Math.round(JSON.stringify(frame).length));

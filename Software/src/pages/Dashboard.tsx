@@ -1,8 +1,5 @@
 import { useTelemetryStore } from "../store";
-import {
-  Thermometer, Zap, Droplets, Gauge,
-  TrendingUp, AlertTriangle, Wind, Radio
-} from "lucide-react";
+import { Gauge } from "lucide-react";
 
 // ── RPM Arc Gauge ─────────────────────────────────────────────
 function RpmGauge({ rpm, max = 12000 }: { rpm: number; max?: number }) {
@@ -113,125 +110,6 @@ function GForcePlot({ lat, lon }: { lat: number; lon: number }) {
   );
 }
 
-// ── Temperature card ──────────────────────────────────────────
-function TempCard({ label, value, warn, crit, icon }: {
-  label: string; value: number; warn: number; crit: number; icon: React.ReactNode;
-}) {
-  const status = value >= crit ? "crit" : value >= warn ? "warn" : "ok";
-  const colorMap = { ok: "var(--accent-green)", warn: "var(--accent-amber)", crit: "var(--accent-red)" };
-  const color = colorMap[status];
-  const pct = Math.min(100, (value / (crit * 1.1)) * 100);
-  const borderClass = status === "crit"
-    ? "border-[#e639464d]"
-    : status === "warn"
-    ? "border-[#ffb7034d]"
-    : "border-[var(--border)]";
-
-  return (
-    <div className={`flex flex-col gap-2 rounded-2xl border bg-[var(--bg-card)] px-4 py-3.5 ${borderClass}`}>
-      <div className="flex items-center gap-1.5">
-        <span className="flex" style={{ color }}>{icon}</span>
-        <span className="flex-1 text-[0.7rem] font-bold tracking-[0.08em] text-[var(--text-muted)]">{label}</span>
-        {status !== "ok" && <AlertTriangle size={13} style={{ color }} />}
-      </div>
-      <div className="mono text-[1.6rem] leading-none font-bold" style={{ color }}>
-        {value.toFixed(1)}<span style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>°C</span>
-      </div>
-      <div className="h-[3px] overflow-hidden rounded bg-[#1e1e30]">
-        <div className="h-full rounded transition-[width] duration-300" style={{ width: `${pct}%`, background: color }} />
-      </div>
-    </div>
-  );
-}
-
-// ── Battery card ──────────────────────────────────────────────
-function BatteryCard({ voltage, current, fault }: { voltage: number; current: number; fault: boolean }) {
-  const status = fault ? "crit" : voltage < 11.5 ? "warn" : "ok";
-  return (
-    <div className="card">
-      <div className="card-header-row">
-        <Zap size={15} style={{ color: "var(--accent-amber)" }} />
-        <span className="card-section-label">BATTERY</span>
-        <span className={`led ${fault ? "led-red led-blink" : "led-green"}`} />
-      </div>
-      <div className="flex items-center gap-3">
-        <div className="flex items-baseline gap-1">
-          <span className={`mono text-[1.6rem] font-bold text-[var(--text-primary)] ${status === "crit" ? "text-crit" : status === "warn" ? "text-warn" : ""}`}>
-            {voltage.toFixed(2)}
-          </span>
-          <span className="text-[0.75rem] text-[var(--text-muted)]">V</span>
-        </div>
-        <div className="h-[30px] w-px bg-[var(--border)]" />
-        <div className="flex items-baseline gap-1">
-          <span className="mono text-[1.6rem] font-bold text-[var(--text-primary)]">{current.toFixed(1)}</span>
-          <span className="text-[0.75rem] text-[var(--text-muted)]">A</span>
-        </div>
-      </div>
-      {fault && (
-        <div className="mt-2 flex items-center gap-1.5 rounded-md bg-[var(--accent-red-dim)] px-2.5 py-1.5 text-[0.7rem] font-bold tracking-[0.06em] text-[var(--accent-red)] animate-pulse">
-          <AlertTriangle size={12} /> SHORT CIRCUIT DETECTED
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Fuel bar ──────────────────────────────────────────────────
-function FuelCard({ level }: { level: number }) {
-  const status = level < 15 ? "crit" : level < 30 ? "warn" : "ok";
-  const color = status === "crit" ? "var(--accent-red)" : status === "warn" ? "var(--accent-amber)" : "var(--accent-cyan)";
-  return (
-    <div className="card">
-      <div className="card-header-row">
-        <Droplets size={15} style={{ color }} />
-        <span className="card-section-label">FUEL</span>
-        <span className="mono" style={{ color, marginLeft: "auto", fontSize: "1rem", fontWeight: 700 }}>
-          {level.toFixed(1)}%
-        </span>
-      </div>
-      <div className="h-2 overflow-hidden rounded bg-[#1e1e30]">
-        <div className="h-full rounded transition-[width] duration-300" style={{ width: `${level}%`, background: color }} />
-      </div>
-    </div>
-  );
-}
-
-// ── System flags ─────────────────────────────────────────────
-function SystemFlags({ fan, drs, autonomy, canErrors }: {
-  fan: boolean; drs: boolean; autonomy: number; canErrors: number;
-}) {
-  const autonomyLabels = ["MANUAL", "ADVISORY", "SEMI-AUTO", "FULL-AUTO"];
-  return (
-    <div className="card">
-      <div className="card-header-row">
-        <Radio size={15} style={{ color: "var(--accent-cyan)" }} />
-        <span className="card-section-label">SYSTEM FLAGS</span>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <div className={`flex items-center gap-1.5 rounded-md border bg-[var(--bg-card)] px-2.5 py-2 text-[0.75rem] font-medium ${fan ? "border-[#06d6a04d] text-[var(--accent-green)]" : "border-[var(--border)] text-[var(--text-muted)]"}`}>
-          <Wind size={14} />
-          <span>FAN</span>
-          <span className={`led ${fan ? "led-green" : "led-gray"}`} />
-        </div>
-        <div className={`flex items-center gap-1.5 rounded-md border bg-[var(--bg-card)] px-2.5 py-2 text-[0.75rem] font-medium ${drs ? "border-[#00d2ff4d] text-[var(--accent-cyan)]" : "border-[var(--border)] text-[var(--text-muted)]"}`}>
-          <TrendingUp size={14} />
-          <span>DRS</span>
-          <span className={`led ${drs ? "led-green" : "led-gray"}`} />
-        </div>
-        <div className="flex items-center gap-1.5 rounded-md border border-[#00d2ff33] bg-[var(--bg-card)] px-2.5 py-2 text-[0.75rem] font-medium text-[var(--accent-cyan)]">
-          <Gauge size={14} />
-          <span style={{ fontSize: "0.7rem" }}>{autonomyLabels[autonomy] ?? "UNKNOWN"}</span>
-        </div>
-        <div className={`flex items-center gap-1.5 rounded-md border bg-[var(--bg-card)] px-2.5 py-2 text-[0.75rem] font-medium ${canErrors > 0 ? "border-[#ffb7034d] text-[var(--accent-amber)]" : "border-[var(--border)] text-[var(--text-muted)]"}`}>
-          <AlertTriangle size={14} />
-          <span>CAN ERR</span>
-          <span className="mono" style={{ fontSize: "0.75rem", marginLeft: "auto" }}>{canErrors}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Main Dashboard ────────────────────────────────────────────
 export default function Dashboard() {
   const current = useTelemetryStore((s) => s.current);
@@ -257,19 +135,25 @@ export default function Dashboard() {
           <RpmGauge rpm={current.rpm} />
         </div>
 
-        {/* Speed */}
+        {/* Air Temperature */}
         <div className="card flex flex-col items-center justify-center gap-0.5 max-xl:col-span-1">
-          <span className="text-[0.68rem] font-semibold tracking-[0.1em] text-[var(--text-muted)]">SPEED</span>
-          <span className="mono text-[3.5rem] leading-none font-extrabold tracking-[-0.02em] text-[var(--text-primary)]">{Math.round(current.speed)}</span>
-          <span className="text-[0.75rem] text-[var(--text-muted)]">km/h</span>
+          <span className="text-[0.68rem] font-semibold tracking-[0.1em] text-[var(--text-muted)]">AIR TEMP</span>
+          <span className="mono text-[3.5rem] leading-none font-extrabold tracking-[-0.02em] text-[var(--text-primary)]">{current.air_temp.toFixed(1)}</span>
+          <span className="text-[0.75rem] text-[var(--text-muted)]">°C</span>
         </div>
 
-        {/* Gear */}
-        <div className="card flex flex-col items-center justify-center">
-          <span className="text-[0.68rem] font-semibold tracking-[0.1em] text-[var(--text-muted)]">GEAR</span>
-          <span className={`mono text-[4rem] leading-none font-black text-[var(--accent-cyan)] drop-shadow-[0_0_30px_rgba(0,210,255,0.4)] ${current.gear === -1 ? "text-crit" : ""}`}>
-            {current.gear === -1 ? "R" : current.gear === 0 ? "N" : current.gear}
-          </span>
+        {/* Air Quality */}
+        <div className="card flex flex-col items-center justify-center gap-0.5 max-xl:col-span-1">
+          <span className="text-[0.68rem] font-semibold tracking-[0.1em] text-[var(--text-muted)]">AIR QUALITY</span>
+          <span className="mono text-[3.5rem] leading-none font-extrabold tracking-[-0.02em] text-[var(--text-primary)]">{Math.round(current.air_quality)}</span>
+          <span className="text-[0.75rem] text-[var(--text-muted)]">AQI</span>
+        </div>
+
+        {/* Pressure */}
+        <div className="card flex flex-col items-center justify-center gap-0.5 max-xl:col-span-1">
+          <span className="text-[0.68rem] font-semibold tracking-[0.1em] text-[var(--text-muted)]">PRESSURE</span>
+          <span className="mono text-[3rem] leading-none font-extrabold tracking-[-0.02em] text-[var(--text-primary)]">{current.pressure.toFixed(1)}</span>
+          <span className="text-[0.75rem] text-[var(--text-muted)]">hPa</span>
         </div>
 
         {/* Throttle / Brake */}
@@ -278,26 +162,13 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Row 2 — Temps */}
-      <div className="grid gap-3.5 md:grid-cols-2 xl:grid-cols-4">
-        <TempCard label="ENGINE"  value={current.temp_engine}  warn={90}  crit={100} icon={<Thermometer size={14} />} />
-        <TempCard label="WATER"   value={current.temp_water}   warn={92}  crit={105} icon={<Thermometer size={14} />} />
-        <TempCard label="OIL"     value={current.temp_oil}     warn={105} crit={120} icon={<Thermometer size={14} />} />
-        <TempCard label="AMBIENT" value={current.temp_ambient} warn={38}  crit={45}  icon={<Thermometer size={14} />} />
-      </div>
-
-      {/* Row 3 — Systems */}
-      <div className="grid gap-3.5 md:grid-cols-2 xl:grid-cols-4">
-        <BatteryCard voltage={current.battery_voltage} current={current.battery_current} fault={current.battery_fault} />
-        <FuelCard level={current.fuel_level} />
-        <SystemFlags fan={current.fan_active} drs={current.drs_active} autonomy={current.autonomy_level} canErrors={current.can_errors} />
-        <div className="card">
-          <div className="card-header-row">
-            <Gauge size={15} style={{ color: "var(--accent-purple)" }} />
-            <span className="card-section-label">G-FORCE</span>
-          </div>
-          <GForcePlot lat={current.g_lat} lon={current.g_lon} />
+      {/* Row 2 — G-Force */}
+      <div className="card">
+        <div className="card-header-row">
+          <Gauge size={15} style={{ color: "var(--accent-purple)" }} />
+          <span className="card-section-label">G-FORCE</span>
         </div>
+        <GForcePlot lat={current.g_lat} lon={current.g_lon} />
       </div>
     </div>
   );

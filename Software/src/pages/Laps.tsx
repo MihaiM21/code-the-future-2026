@@ -11,9 +11,9 @@ function formatMs(ms: number): string {
   return `${m}:${String(s).padStart(2, "0")}.${String(ms2).padStart(3, "0")}`;
 }
 
-function exportCsv(frames: { ts: number; rpm: number; speed: number; throttle: number; brake: number }[], lapNum: number) {
-  const header = "ts,rpm,speed,throttle,brake\n";
-  const rows = frames.map((f) => `${f.ts},${f.rpm},${f.speed},${f.throttle},${f.brake}`).join("\n");
+function exportCsv(frames: { ts: number; rpm: number; throttle: number; brake: number }[], lapNum: number) {
+  const header = "ts,rpm,throttle,brake\n";
+  const rows = frames.map((f) => `${f.ts},${f.rpm},${f.throttle},${f.brake}`).join("\n");
   const blob = new Blob([header + rows], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -34,8 +34,7 @@ export default function Laps() {
 
   const chartData = lap
     ? lap.frames.filter((_, i) => i % 5 === 0).map((f) => ({
-        t: ((f.lap_time / 1000)).toFixed(1),
-        speed: f.speed,
+        t: ((f.ts / 1000)).toFixed(1),
         throttle: f.throttle,
         brake: f.brake,
         rpm: Math.round(f.rpm / 100) * 100,
