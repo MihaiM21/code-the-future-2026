@@ -7,25 +7,36 @@ import {
   ChevronLeft,
   Zap,
   Gauge,
+  LogOut,
 } from "lucide-react";
 import type { Page } from "../types";
+import { useAuthStore } from "../store/auth";
 
 interface Props {
   currentPage: Page;
   onNavigate: (p: Page) => void;
   collapsed: boolean;
   onToggle: () => void;
+  onLogout: () => void;
 }
 
 const navItems: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: "dashboard", label: "Dashboard",  icon: <LayoutDashboard size={18} /> },
   { id: "safety",    label: "Safety",     icon: <ShieldCheck size={18} /> },
   { id: "can",       label: "CAN Bus",    icon: <Network size={18} /> },
-  { id: "laps",      label: "Analytics",  icon: <TrendingUp size={18} /> },
+  { id: "laps",      label: "Sessions",  icon: <TrendingUp size={18} /> },
   { id: "settings",  label: "Connection", icon: <Settings size={18} /> },
 ];
 
-export default function Sidebar({ currentPage, onNavigate, collapsed, onToggle }: Props) {
+export default function Sidebar({ currentPage, onNavigate, collapsed, onToggle, onLogout }: Props) {
+  const { user } = useAuthStore();
+
+  const handleLogout = () => {
+    if (confirm("Are you sure you want to logout?")) {
+      onLogout();
+    }
+  };
+
   return (
     <aside className="row-span-2 flex flex-col overflow-hidden border-r border-[var(--border)] bg-[var(--bg-surface)]">
       <div className="relative flex h-14 items-center gap-2.5 border-b border-[var(--border)] px-3.5 py-4">
@@ -61,8 +72,31 @@ export default function Sidebar({ currentPage, onNavigate, collapsed, onToggle }
         ))}
       </nav>
 
-      <div className="border-t border-[var(--border)] px-3.5 py-3">
-        {!collapsed && <span className="mono text-[0.72rem] text-[var(--text-muted)]">v0.1.0</span>}
+      <div className="border-t border-[var(--border)] space-y-3 px-2 py-3">
+        {!collapsed && user && (
+          <div className="px-2 py-2 rounded-lg bg-[var(--bg-card)]">
+            <p className="text-xs text-[var(--text-muted)] uppercase tracking-wide">Logged in as</p>
+            <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{user.username}</p>
+            <span
+              className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[0.62rem] font-bold uppercase tracking-[0.08em] ${
+                user.role === "authorized_user"
+                  ? "border-[#06d6a04d] bg-[var(--accent-green-dim)] text-[var(--accent-green)]"
+                  : "border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-muted)]"
+              }`}
+            >
+              {user.role === "authorized_user" ? "Authorized User" : "User"}
+            </span>
+          </div>
+        )}
+        <button
+          onClick={handleLogout}
+          className="w-full flex items-center justify-center gap-2 px-2.5 py-2 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors text-sm font-medium"
+          title={collapsed ? "Logout" : undefined}
+        >
+          <LogOut size={16} />
+          {!collapsed && "Logout"}
+        </button>
+        {!collapsed && <span className="mono text-[0.72rem] text-[var(--text-muted)] block px-2">v0.1.0</span>}
       </div>
     </aside>
   );

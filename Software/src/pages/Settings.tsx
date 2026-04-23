@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { useSerialStore } from "../store";
 import { listPorts, connectSerial, disconnectSerial, startDemo, stopDemo } from "../services/serial";
+import { getInfluxStatus } from "../services/influx";
 import { useTelemetryStore } from "../store";
-import { RefreshCw, Plug, PlugZap, Play, Square, Terminal } from "lucide-react";
+import { useAuthStore } from "../store/auth";
+import type { InfluxStatus } from "../types";
+import { RefreshCw, Plug, PlugZap, Play, Square, Terminal, Lock } from "lucide-react";
 
 const BAUD_RATES = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
 
@@ -27,14 +30,19 @@ function buildPortLabel(
 export default function Settings() {
   const { config, availablePorts, bytesPerSec, lastFrameAge, setConfig, setPorts } = useSerialStore();
   const history = useTelemetryStore((s) => s.history);
+  const isAuthorized = useAuthStore((s) => s.isAuthorized);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [rawView, setRawView] = useState(false);
+  const [influx, setInflux] = useState<InfluxStatus | null>(null);
+  const [influxLoading, setInfluxLoading] = useState(false);
+  const [influxError, setInfluxError] = useState<string | null>(null);
 
   const isDemo = config.port === "DEMO";
   const espCandidates = availablePorts.filter((p) => p.isLikelyEsp);
 
   const handleScan = async () => {
+    if (!isAuthorized) return;
     setError(null);
     setLoading(true);
     try {
@@ -54,6 +62,7 @@ export default function Settings() {
   };
 
   const handleConnect = async () => {
+    if (!isAuthorized) return;
     setError(null);
     if (!config.port) { setError("Select a COM port first."); return; }
     setLoading(true);
@@ -66,12 +75,33 @@ export default function Settings() {
   };
 
   const handleDisconnect = async () => {
+    if (!isAuthorized) return;
     await disconnectSerial();
+  };
+
+  const handleInfluxRefresh = async () => {
+    setInfluxLoading(true);
+    setInfluxError(null);
+    try {
+      const status = await getInfluxStatus();
+      setInflux(status);
+    } catch (e) {
+      setInfluxError(String(e));
+    } finally {
+      setInfluxLoading(false);
+    }
   };
 
   return (
     <div className="page-content">
       <div className="flex max-w-[680px] flex-col gap-3.5">
+        {!isAuthorized && (
+          <div className="flex items-center gap-2 rounded-[10px] border border-[#ffb70333] bg-[var(--accent-amber-dim)] px-3.5 py-2.5 text-[0.82rem] font-medium text-[var(--accent-amber)]">
+            <Lock size={14} />
+            Viewing mode: only Authorized Users can change connection options.
+          </div>
+        )}
+
         {/* Connection panel */}
         <div className="card">
           <div className="card-header-row">
@@ -86,7 +116,7 @@ export default function Settings() {
                 className="flex-1 cursor-pointer rounded-[10px] border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent-cyan)] disabled:cursor-not-allowed disabled:opacity-50"
                 value={config.port}
                 onChange={(e) => setConfig({ port: e.target.value })}
-                disabled={config.connected}
+                disabled={config.connected || !isAuthorized}
               >
                 <option value="">— Select port —</option>
                 {availablePorts.map((p) => (
@@ -95,7 +125,7 @@ export default function Settings() {
                   </option>
                 ))}
               </select>
-              <button className="btn btn-ghost" onClick={handleScan} disabled={config.connected || loading}>
+              <button className="btn btn-ghost" onClick={handleScan} disabled={config.connected || loading || !isAuthorized}>
                 <RefreshCw size={14} className={loading ? "spin" : ""} /> Scan
               </button>
             </div>
@@ -114,7 +144,7 @@ export default function Settings() {
               className="flex-1 cursor-pointer rounded-[10px] border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent-cyan)] disabled:cursor-not-allowed disabled:opacity-50"
               value={config.baud}
               onChange={(e) => setConfig({ baud: +e.target.value })}
-              disabled={config.connected}
+              disabled={config.connected || !isAuthorized}
             >
               {BAUD_RATES.map((b) => (
                 <option key={b} value={b}>{b.toLocaleString()}</option>
@@ -126,11 +156,11 @@ export default function Settings() {
 
           <div className="mt-1 flex gap-2.5">
             {!config.connected ? (
-              <button className="btn btn-primary" onClick={handleConnect} disabled={loading || !config.port}>
+              <button className="btn btn-primary" onClick={handleConnect} disabled={loading || !config.port || !isAuthorized}>
                 <PlugZap size={14} /> Connect
               </button>
             ) : (
-              <button className="btn btn-danger" onClick={handleDisconnect}>
+              <button className="btn btn-danger" onClick={handleDisconnect} disabled={!isAuthorized}>
                 <Square size={14} /> Disconnect
               </button>
             )}
@@ -148,11 +178,11 @@ export default function Settings() {
           </p>
           <div className="mt-1 flex gap-2.5">
             {!isDemo ? (
-              <button className="btn btn-primary" onClick={startDemo} disabled={config.connected && !isDemo}>
+              <button className="btn btn-primary" onClick={startDemo} disabled={(config.connected && !isDemo) || !isAuthorized}>
                 <Play size={14} /> Start Demo
               </button>
             ) : (
-              <button className="btn btn-danger" onClick={stopDemo}>
+              <button className="btn btn-danger" onClick={stopDemo} disabled={!isAuthorized}>
                 <Square size={14} /> Stop Demo
               </button>
             )}
@@ -190,6 +220,64 @@ export default function Settings() {
             </div>
           </div>
         )}
+
+        <div className="card">
+          <div className="card-header-row">
+            <Plug size={16} style={{ color: "var(--accent-cyan)" }} />
+            <h3>InfluxDB Storage</h3>
+            <button
+              className="btn btn-ghost"
+              style={{ marginLeft: "auto", fontSize: "0.75rem", padding: "4px 10px" }}
+              onClick={handleInfluxRefresh}
+              disabled={influxLoading}
+            >
+              <RefreshCw size={12} className={influxLoading ? "spin" : ""} /> Refresh
+            </button>
+          </div>
+
+          {!influx && !influxError && (
+            <p className="text-[0.85rem] leading-relaxed text-[var(--text-secondary)]">
+              Click Refresh to verify if telemetry persistence to InfluxDB is configured.
+            </p>
+          )}
+
+          {influxError && (
+            <div className="rounded-md border border-[#e639464d] bg-[var(--accent-red-dim)] px-3 py-2 text-[0.82rem] text-[var(--accent-red)]">
+              {influxError}
+            </div>
+          )}
+
+          {influx && (
+            <div className="grid grid-cols-2 gap-3 text-[0.82rem]">
+              <div className="flex flex-col gap-1">
+                <span className="text-[0.65rem] font-bold tracking-[0.08em] text-[var(--text-muted)]">STATUS</span>
+                <span className={`font-bold ${influx.enabled ? "text-ok" : "text-crit"}`}>
+                  {influx.enabled ? "ENABLED" : "DISABLED"}
+                </span>
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-[0.65rem] font-bold tracking-[0.08em] text-[var(--text-muted)]">BUCKET</span>
+                <span className="mono text-[var(--text-primary)]">{influx.bucket ?? "-"}</span>
+              </div>
+              <div className="col-span-2 flex flex-col gap-1">
+                <span className="text-[0.65rem] font-bold tracking-[0.08em] text-[var(--text-muted)]">ENDPOINT</span>
+                <span className="mono text-[var(--text-primary)]">{influx.url ?? "-"}</span>
+              </div>
+              <div className="col-span-2 flex flex-col gap-1">
+                <span className="text-[0.65rem] font-bold tracking-[0.08em] text-[var(--text-muted)]">LAST WRITE ERROR</span>
+                <span className={influx.lastWriteError ? "text-crit" : "text-ok"}>
+                  {influx.lastWriteError ?? "None"}
+                </span>
+              </div>
+              <div className="col-span-2 flex flex-col gap-1">
+                <span className="text-[0.65rem] font-bold tracking-[0.08em] text-[var(--text-muted)]">LAST SUCCESS</span>
+                <span className="mono text-[var(--text-primary)]">
+                  {influx.lastWriteSuccess ? new Date(influx.lastWriteSuccess).toLocaleString() : "No successful writes yet"}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Raw serial monitor */}
         {config.connected && (

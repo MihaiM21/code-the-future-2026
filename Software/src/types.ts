@@ -4,6 +4,10 @@ export interface TelemetryFrame {
   air_temp: number;     // °C
   air_quality: number;  // AQI or ppm
   pressure: number;     // hPa or similar
+  engine_temp?: number;  // °C, optional if firmware provides it
+  coolant_temp?: number; // °C, optional if firmware provides it
+  exhaust_temp?: number; // °C, optional if firmware provides it
+  battery_v?: number;    // V, optional if firmware provides it
   // IMU (MPU6050)
   g_lat: number;        // G (lateral acceleration)
   g_lon: number;        // G (longitudinal acceleration)
@@ -13,6 +17,11 @@ export interface TelemetryFrame {
   brake: number;        // 0 or 1
   // Engine
   rpm: number;
+  // Optional decoded status and diagnostics
+  can_errors?: number;
+  fan_active?: boolean;
+  drs_active?: boolean;
+  alerts?: AlertEntry[];
 }
 
 export interface AlertEntry {
@@ -21,6 +30,26 @@ export interface AlertEntry {
   severity: "info" | "warning" | "critical";
   message: string;
   system: string;
+}
+
+export type AutonomyLevel = 1 | 2 | 3 | 4;
+export type AutonomyActionStatus = "pending" | "approved" | "sent" | "rejected" | "blocked";
+export type AutonomyDomain = "safety" | "performance";
+
+export interface AutonomyAction {
+  id: string;
+  ruleId: string;
+  ts: number;
+  level: AutonomyLevel;
+  domain: AutonomyDomain;
+  severity: AlertEntry["severity"];
+  title: string;
+  rationale: string;
+  trigger: string;
+  suggestedCommands: string[];
+  command: string;
+  requiresApproval: boolean;
+  status: AutonomyActionStatus;
 }
 
 export type Page = "dashboard" | "safety" | "can" | "laps" | "settings";
@@ -41,4 +70,27 @@ export interface SerialPortInfo {
   pid: number | null;
   isUsb: boolean;
   isLikelyEsp: boolean;
+}
+
+export interface InfluxStatus {
+  enabled: boolean;
+  url: string | null;
+  org: string | null;
+  bucket: string | null;
+  measurement: string | null;
+  lastWriteError: string | null;
+  lastWriteSuccess: number | null;
+}
+
+export interface InfluxTelemetryPoint {
+  ts: number;
+  air_temp: number | null;
+  air_quality: number | null;
+  pressure: number | null;
+  g_lat: number | null;
+  g_lon: number | null;
+  g_vert: number | null;
+  throttle: number | null;
+  brake: number | null;
+  rpm: number | null;
 }

@@ -2,6 +2,9 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type { TelemetryFrame, SerialPortInfo } from "../types";
 import { useTelemetryStore, useAlertStore, useSerialStore, useLapStore } from "../store";
+import { useAuthStore } from "../store/auth";
+import { evaluateAutonomyFrame } from "./autonomy";
+import { sendSerialCommand } from "./command";
 
 let unlistenFn: (() => void) | null = null;
 let byteCount = 0;
@@ -47,8 +50,13 @@ export async function disconnectSerial(): Promise<void> {
 
 // ── Send command to RPi via ESP32 ─────────────────────────────
 export async function sendCommand(cmd: string): Promise<void> {
+  const role = useAuthStore.getState().user?.role;
+  if (role !== "authorized_user") {
+    throw new Error("Only Authorized Users can send control commands.");
+  }
+
   try {
-    await invoke("send_command", { cmd });
+    await sendSerialCommand(cmd);
   } catch (e) {
     console.error("send_command error:", e);
   }
@@ -72,24 +80,30 @@ async function startListening() {
     if (frame.alerts && frame.alerts.length > 0) {
       frame.alerts.forEach((a) => useAlertStore.getState().addAlert(a));
     }
+
+    evaluateAutonomyFrame(frame);
   });
 }
 
 // ── Demo simulator (used when no hardware connected) ──────────
 let demoIntervalId: ReturnType<typeof setInterval> | null = null;
-let demoLapFrames: TelemetryFrame[] = [];
 let demoLapNumber = 1;
+let demoLapStartTs = 0;
 
 export function startDemo() {
   if (demoIntervalId) return;
   useSerialStore.getState().setConfig({ port: "DEMO", baud: 0, connected: true });
+  demoLapStartTs = Date.now();
 
   let t = 0;
   demoIntervalId = setInterval(() => {
     t += 0.1;
-    const rpm = 4000 + 4000 * Math.abs(Math.sin(t * 0.5));
-    const throttle = Math.sin(t * 0.5) > 0 ? 1 : 0;
-    const brake = throttle === 0 && Math.sin(t * 0.3) > 0.5 ? 1 : 0;
+
+    const throttleRaw = Math.sin(t * 0.5);
+    const brakeRaw = Math.sin(t * 0.3);
+    // Smooth 0-100 pedal values so the dashboard bars animate visibly
+    const throttle = throttleRaw > 0 ? Math.round(throttleRaw * 100) : 0;
+    const brake = throttleRaw <= 0 && brakeRaw > 0.3 ? Math.round(brakeRaw * 100) : 0;
 
     const frame: TelemetryFrame = {
       ts: Date.now(),
@@ -101,16 +115,21 @@ export function startDemo() {
       g_vert: 1.0 + 0.3 * Math.sin(t * 2),
       throttle,
       brake,
-      rpm: Math.round(rpm),
+      rpm: Math.round(4000 + 4000 * Math.abs(Math.sin(t * 0.5))),
     };
+
     lastFrameTs = Date.now();
     useSerialStore.getState().setLastFrameAge(0);
     useSerialStore.getState().setBytesPerSec(Math.round(JSON.stringify(frame).length));
 
+    useTelemetryStore.getState().pushFrame(frame);
+    useLapStore.getState().pushLapFrame(frame);
+
+    const lapTime = Date.now() - demoLapStartTs;
     if (lapTime > 85000) {
       useLapStore.getState().finalizeLap(demoLapNumber, lapTime);
       demoLapNumber++;
-      demoLapFrames = [];
+      demoLapStartTs = Date.now();
     }
   }, 100);
 }
