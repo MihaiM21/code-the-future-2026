@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useTelemetryStore } from "../store";
 import { Gauge, Zap, Activity } from "lucide-react";
+import DiagnosisPanel from "../components/DiagnosisPanel";
 
 // ── Shift Light Bar ───────────────────────────────────────────
 function ShiftLightBar({ rpm, max = 12000, blinkOn }: { rpm: number; max?: number; blinkOn: boolean }) {
@@ -476,8 +477,8 @@ export default function Dashboard() {
         <StatusStrip drs={current.drs_active} fan={current.fan_active} battV={current.battery_v} />
       </div>
 
-      {/* Row 4 — Sensor data tiles */}
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+      {/* Row 4 — Sensor data tiles + Diagnosis */}
+      <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr minmax(220px,280px)" }}>
         <DataTile
           label="AIR TEMP"
           value={current.air_temp.toFixed(1)}
@@ -519,6 +520,7 @@ export default function Dashboard() {
           unit="hPa"
           status="ok"
         />
+        <DiagnosisPanel />
       </div>
     </div>
   );

@@ -1,15 +1,94 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import type { TelemetryFrame, SerialPortInfo } from "../types";
-import { useTelemetryStore, useAlertStore, useSerialStore, useLapStore } from "../store";
+import type { SerialPortInfo } from "../types";
+import { useTelemetryStore, useAlertStore, useSerialStore, useLapStore, useLogStore, useConfigStore, useReliabilityStore } from "../store";
 import { useAuthStore } from "../store/auth";
 import { evaluateAutonomyFrame } from "./autonomy";
+import { evaluateDiagnosis } from "./diagnosis";
+import { startReliabilityTracking, stopReliabilityTracking, finalizeReliabilitySession } from "./reliability";
+import type { TelemetryFrame } from "../types";
 import { sendSerialCommand } from "./command";
 
-let unlistenFn: (() => void) | null = null;
+let unlistenAll: (() => void) | null = null;
 let byteCount = 0;
 let lastSecTs = Date.now();
 let lastFrameTs = Date.now();
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
+function asFiniteNumber(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+function firstDefined(...values: Array<number | undefined>): number | undefined {
+  return values.find((v) => v !== undefined);
+}
+
+function toTelemetryFrame(payload: unknown): TelemetryFrame | null {
+  if (!isRecord(payload)) return null;
+
+  const ts = asFiniteNumber(payload.ts) ?? Date.now();
+
+  const dht22 = isRecord(payload.dht22) ? payload.dht22 : undefined;
+  const bmp280 = isRecord(payload.bmp280) ? payload.bmp280 : undefined;
+  const mpu6050 = isRecord(payload.mpu6050) ? payload.mpu6050 : undefined;
+
+  const accel = Array.isArray(mpu6050?.accelerometer_m_s2)
+    ? mpu6050.accelerometer_m_s2
+    : undefined;
+
+  const accelX = asFiniteNumber(accel?.[0]);
+  const accelY = asFiniteNumber(accel?.[1]);
+  const accelZ = asFiniteNumber(accel?.[2]);
+  const G = 9.80665;
+
+  const airTemp = firstDefined(
+    asFiniteNumber(payload.air_temp),
+    asFiniteNumber(dht22?.temperature_c),
+  );
+
+  const pressure = firstDefined(
+    asFiniteNumber(payload.pressure),
+    asFiniteNumber(bmp280?.pressure_hpa),
+  );
+
+  const gLat = firstDefined(asFiniteNumber(payload.g_lat), accelX !== undefined ? accelX / G : undefined, 0);
+  const gLon = firstDefined(asFiniteNumber(payload.g_lon), accelY !== undefined ? accelY / G : undefined, 0);
+  const gVert = firstDefined(asFiniteNumber(payload.g_vert), accelZ !== undefined ? accelZ / G : undefined, 1);
+
+  const rpm = firstDefined(asFiniteNumber(payload.rpm), 0);
+  const throttle = firstDefined(asFiniteNumber(payload.throttle), 0);
+  const brake = firstDefined(asFiniteNumber(payload.brake), 0);
+
+  // If core numeric fields are absent, this payload is not telemetry for the dashboard.
+  if (airTemp === undefined || pressure === undefined) {
+    return null;
+  }
+
+  const telemetry: TelemetryFrame = {
+    ts,
+    air_temp: airTemp,
+    air_quality: firstDefined(asFiniteNumber(payload.air_quality), 0) as number,
+    pressure,
+    engine_temp: asFiniteNumber(payload.engine_temp),
+    coolant_temp: asFiniteNumber(payload.coolant_temp),
+    exhaust_temp: asFiniteNumber(payload.exhaust_temp),
+    battery_v: asFiniteNumber(payload.battery_v),
+    g_lat: gLat as number,
+    g_lon: gLon as number,
+    g_vert: gVert as number,
+    throttle: Math.max(0, Math.min(100, throttle as number)),
+    brake: Math.max(0, Math.min(100, brake as number)),
+    rpm: Math.max(0, rpm as number),
+    can_errors: asFiniteNumber(payload.can_errors),
+    fan_active: typeof payload.fan_active === "boolean" ? payload.fan_active : undefined,
+    drs_active: typeof payload.drs_active === "boolean" ? payload.drs_active : undefined,
+  };
+
+  return telemetry;
+}
 
 // ── Byte-rate tracker ─────────────────────────────────────────
 setInterval(() => {
@@ -33,6 +112,8 @@ export async function connectSerial(port: string, baud: number): Promise<void> {
   try {
     await invoke("connect_serial", { port, baud });
     useSerialStore.getState().setConfig({ port, baud, connected: true });
+    useReliabilityStore.getState().startSession();
+    startReliabilityTracking();
     await startListening();
   } catch (e) {
     throw new Error(`Failed to connect: ${e}`);
@@ -44,8 +125,10 @@ export async function disconnectSerial(): Promise<void> {
   try {
     await invoke("disconnect_serial");
   } catch (_) {/* ignore */}
+  finalizeReliabilitySession();
+  stopReliabilityTracking();
   useSerialStore.getState().setConfig({ connected: false });
-  if (unlistenFn) { unlistenFn(); unlistenFn = null; }
+  if (unlistenAll) { unlistenAll(); unlistenAll = null; }
 }
 
 // ── Send command to RPi via ESP32 ─────────────────────────────
@@ -64,25 +147,72 @@ export async function sendCommand(cmd: string): Promise<void> {
 
 // ── Listen for telemetry events from Rust ─────────────────────
 async function startListening() {
-  if (unlistenFn) return;
-  unlistenFn = await listen<TelemetryFrame>("telemetry-update", ({ payload }) => {
-    const frame = payload;
-    byteCount += JSON.stringify(frame).length;
+  if (unlistenAll) return;
+
+  const unRaw = await listen<string>("serial-raw", ({ payload }) => {
+    useLogStore.getState().addLog(payload, "raw");
+  });
+
+  const unRawErr = await listen<string>("serial-raw-error", ({ payload }) => {
+    console.warn("[serial] Raw parse error from hardware:", payload);
+    useLogStore.getState().addLog(payload, "error");
+    useAlertStore.getState().addAlert({
+      id: `raw-err-${Date.now()}`,
+      ts: Date.now(),
+      severity: "warning",
+      system: "Hardware",
+      message: `Invalid JSON: ${payload.substring(0, 80)}`,
+    });
+  });
+
+  // Rust reader thread died (USB pulled, port error, etc.)
+  const unDisconnected = await listen("serial-disconnected", () => {
+    useLogStore.getState().addLog("[serial] Device disconnected unexpectedly", "error");
+    useAlertStore.getState().addAlert({
+      id: `disconnected-${Date.now()}`,
+      ts: Date.now(),
+      severity: "critical",
+      system: "Serial",
+      message: "Serial device disconnected unexpectedly",
+    });
+    finalizeReliabilitySession();
+    stopReliabilityTracking();
+    useSerialStore.getState().setConfig({ connected: false });
+    if (unlistenAll) { unlistenAll(); unlistenAll = null; }
+  });
+
+  const unTelemetry = await listen<unknown>("telemetry-update", ({ payload }) => {
+    byteCount += JSON.stringify(payload).length;
     lastFrameTs = Date.now();
 
-    // Push to ring buffer
-    useTelemetryStore.getState().pushFrame(frame);
+    const frame = toTelemetryFrame(payload);
+    if (!frame) {
+      useLogStore.getState().addLog(`[serial] Dropped non-telemetry payload: ${JSON.stringify(payload).slice(0, 180)}`, "error");
+      return;
+    }
 
-    // Push to lap buffer
+    useTelemetryStore.getState().pushFrame(frame);
     useLapStore.getState().pushLapFrame(frame);
 
-    // Forward any alerts
     if (frame.alerts && frame.alerts.length > 0) {
       frame.alerts.forEach((a) => useAlertStore.getState().addAlert(a));
     }
 
     evaluateAutonomyFrame(frame);
+    evaluateDiagnosis(
+      frame,
+      useTelemetryStore.getState().history,
+      useConfigStore.getState(),
+      useSerialStore.getState().lastFrameAge,
+    );
   });
+
+  unlistenAll = () => {
+    unRaw();
+    unRawErr();
+    unDisconnected();
+    unTelemetry();
+  };
 }
 
 // ── Demo simulator (used when no hardware connected) ──────────
@@ -93,6 +223,8 @@ let demoLapStartTs = 0;
 export function startDemo() {
   if (demoIntervalId) return;
   useSerialStore.getState().setConfig({ port: "DEMO", baud: 0, connected: true });
+  useReliabilityStore.getState().startSession();
+  startReliabilityTracking();
   demoLapStartTs = Date.now();
 
   let t = 0;
@@ -124,6 +256,13 @@ export function startDemo() {
 
     useTelemetryStore.getState().pushFrame(frame);
     useLapStore.getState().pushLapFrame(frame);
+    useLogStore.getState().addLog(JSON.stringify(frame), "raw");
+    evaluateDiagnosis(
+      frame,
+      useTelemetryStore.getState().history,
+      useConfigStore.getState(),
+      0,
+    );
 
     const lapTime = Date.now() - demoLapStartTs;
     if (lapTime > 85000) {
@@ -136,5 +275,7 @@ export function startDemo() {
 
 export function stopDemo() {
   if (demoIntervalId) { clearInterval(demoIntervalId); demoIntervalId = null; }
+  finalizeReliabilitySession();
+  stopReliabilityTracking();
   useSerialStore.getState().setConfig({ connected: false, port: "" });
 }

@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter};
@@ -144,10 +144,14 @@ pub fn connect_serial(
     state: tauri::State<SerialState>,
     influx: tauri::State<InfluxState>,
 ) -> Result<(), String> {
-    let serial = serialport::new(&port, baud)
-        .timeout(std::time::Duration::from_millis(5000))
+    let mut serial = serialport::new(&port, baud)
+        .timeout(std::time::Duration::from_millis(100))
         .open()
         .map_err(|e| format!("Cannot open {port}: {e}"))?;
+
+    // ESP32 and some other boards often need DTR/RTS set to start sending data
+    let _ = serial.write_data_terminal_ready(true);
+    let _ = serial.write_request_to_send(true);
 
     // Keep a clone for writing commands back
     let write_clone = serial
@@ -163,18 +167,48 @@ pub fn connect_serial(
     let app_clone = app.clone();
     let influx_state = influx.inner().clone();
     thread::spawn(move || {
-        let reader = BufReader::new(serial);
-        for line in reader.lines() {
-            match line {
-                Ok(json) => {
-                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
-                        influx_state.enqueue(&value);
-                        let _ = app_clone.emit("telemetry-update", value);
+        let mut buf: Vec<u8> = Vec::with_capacity(2048);
+        let mut chunk = [0u8; 256];
+        loop {
+            match serial.read(&mut chunk) {
+                Ok(0) => continue,
+                Ok(n) => {
+                    for &b in &chunk[..n] {
+                        if b == b'\n' {
+                            // strip trailing \r if present
+                            if buf.last() == Some(&b'\r') { buf.pop(); }
+                            if !buf.is_empty() {
+                                // Use lossy conversion so non-UTF-8 bytes (wrong baud rate,
+                                // line noise) are replaced with U+FFFD instead of silently
+                                // swallowed.
+                                let s = String::from_utf8_lossy(&buf).into_owned();
+                                let _ = app_clone.emit("serial-raw", s.as_str());
+                                if let Some(json_start) = s.find('{') {
+                                    let json_str = &s[json_start..];
+                                    match serde_json::from_str::<serde_json::Value>(json_str) {
+                                        Ok(value) => {
+                                            influx_state.enqueue(&value);
+                                            let _ = app_clone.emit("telemetry-update", &value);
+                                        }
+                                        Err(e) => {
+                                            eprintln!("[serial] JSON parse error: {e}. Raw: {s}");
+                                            let _ = app_clone.emit("serial-raw-error", s.as_str());
+                                        }
+                                    }
+                                }
+                                buf.clear();
+                            }
+                        } else {
+                            buf.push(b);
+                        }
                     }
                 }
+                Err(e) if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                ) => continue,
                 Err(e) => {
                     eprintln!("[serial] Read error: {e}");
-                    // Emit disconnect notification
                     let _ = app_clone.emit("serial-disconnected", ());
                     break;
                 }

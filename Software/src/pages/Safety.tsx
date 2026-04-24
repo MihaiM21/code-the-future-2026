@@ -4,6 +4,7 @@ import { useTelemetryStore } from "../store";
 import { useAuthStore } from "../store/auth";
 import { sendCommand } from "../services/serial";
 import AutonomyQueue from "../components/AutonomyQueue";
+import ReliabilityPanel from "../components/ReliabilityPanel";
 import type { AutonomyLevel } from "../types";
 import {
   ShieldCheck, ShieldAlert, Sliders, Bell,
@@ -335,6 +336,7 @@ export default function Safety() {
           <AutonomyQueue />
         </div>
         <div className="flex min-h-0 flex-col gap-3.5">
+          <ReliabilityPanel />
           <AlertLog />
         </div>
       </div>

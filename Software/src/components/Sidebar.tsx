@@ -11,6 +11,7 @@ import {
   Bot,
   CheckCircle2,
   CircleSlash,
+  Terminal,
 } from "lucide-react";
 import type { Page } from "../types";
 import { useAuthStore } from "../store/auth";
@@ -113,6 +114,7 @@ const navItems: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: "can",       label: "CAN Bus",    icon: <Network size={18} /> },
   { id: "laps",      label: "Sessions",  icon: <TrendingUp size={18} /> },
   { id: "autonomy",  label: "Autonomy",  icon: <Database size={18} /> },
+  { id: "terminal",  label: "Terminal",   icon: <Terminal size={18} /> },
   { id: "settings",  label: "Connection", icon: <Settings size={18} /> },
 ];
 

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { TelemetryFrame, AlertEntry, SerialConfig, SerialPortInfo, AutonomyAction, AutonomyLevel } from "../types";
+import type { TelemetryFrame, AlertEntry, SerialConfig, SerialPortInfo, AutonomyAction, AutonomyLevel, DiagnosisResult, ReliabilityData, StressCounter, ComponentLifetime } from "../types";
 
 const RING_BUFFER_SIZE = 600; // ~60 seconds at 10 fps
 
@@ -126,6 +126,155 @@ export const useAutonomyStore = create<AutonomyState>((set) => ({
   setActions: (actions) => set({ actions }),
 }));
 
+// ── Reliability Store (persisted to localStorage) ───────────
+const RELIABILITY_KEY = "aems_reliability_v1";
+
+const DEFAULT_LIFETIME: ComponentLifetime[] = [
+  { component: "Engine",  usageScore: 0, budgetScore: 36000, pctRemaining: 100, lastUpdated: 0 },
+  { component: "Exhaust", usageScore: 0, budgetScore: 18000, pctRemaining: 100, lastUpdated: 0 },
+  { component: "Battery", usageScore: 0, budgetScore: 14400, pctRemaining: 100, lastUpdated: 0 },
+  { component: "RPM",     usageScore: 0, budgetScore: 7200,  pctRemaining: 100, lastUpdated: 0 },
+];
+
+function loadReliability(): ReliabilityData {
+  try {
+    const raw = localStorage.getItem(RELIABILITY_KEY);
+    if (raw) return JSON.parse(raw) as ReliabilityData;
+  } catch (_) {/* ignore */}
+  return { sessions: [], cumulativeStress: [], lifetime: DEFAULT_LIFETIME };
+}
+
+interface ReliabilityState {
+  data: ReliabilityData;
+  // Current session accumulators (not persisted mid-session)
+  sessionStress: StressCounter[];
+  sessionHealthSamples: number[];
+  sessionStartTs: number | null;
+  setData: (d: ReliabilityData) => void;
+  accumulateStress: (subsystem: string, status: "ok" | "warn" | "crit") => void;
+  recordHealthSample: (pct: number) => void;
+  startSession: () => void;
+  finalizeSession: (peakEngineTemp: number | null, peakExhaustTemp: number | null, minBatteryV: number | null, peakRpm: number, avgRpm: number, peakGLat: number, peakGLon: number, lapCount: number) => void;
+}
+
+export const useReliabilityStore = create<ReliabilityState>((set, get) => ({
+  data: loadReliability(),
+  sessionStress: [],
+  sessionHealthSamples: [],
+  sessionStartTs: null,
+
+  setData: (d) => {
+    localStorage.setItem(RELIABILITY_KEY, JSON.stringify(d));
+    set({ data: d });
+  },
+
+  accumulateStress: (subsystem, status) => {
+    if (status === "ok") return;
+    set((s) => {
+      const existing = s.sessionStress.find((c) => c.subsystem === subsystem);
+      if (existing) {
+        return {
+          sessionStress: s.sessionStress.map((c) =>
+            c.subsystem === subsystem
+              ? { ...c, secondsInWarn: c.secondsInWarn + (status === "warn" ? 1 : 0), secondsInCrit: c.secondsInCrit + (status === "crit" ? 1 : 0) }
+              : c,
+          ),
+        };
+      }
+      return {
+        sessionStress: [
+          ...s.sessionStress,
+          { subsystem, secondsInWarn: status === "warn" ? 1 : 0, secondsInCrit: status === "crit" ? 1 : 0 },
+        ],
+      };
+    });
+  },
+
+  recordHealthSample: (pct) => set((s) => ({ sessionHealthSamples: [...s.sessionHealthSamples, pct] })),
+
+  startSession: () => set({ sessionStress: [], sessionHealthSamples: [], sessionStartTs: Date.now() }),
+
+  finalizeSession: (peakEngineTemp, peakExhaustTemp, minBatteryV, peakRpm, avgRpm, peakGLat, peakGLon, lapCount) => {
+    const state = get();
+    if (!state.sessionStartTs) return;
+
+    const avgHealth =
+      state.sessionHealthSamples.length > 0
+        ? Math.round(state.sessionHealthSamples.reduce((a, b) => a + b, 0) / state.sessionHealthSamples.length)
+        : 100;
+
+    const session = {
+      sessionId: `s-${state.sessionStartTs}`,
+      startTs: state.sessionStartTs,
+      endTs: Date.now(),
+      peakEngineTemp,
+      peakExhaustTemp,
+      minBatteryV,
+      peakRpm,
+      avgRpm,
+      peakGLat,
+      peakGLon,
+      healthPctAvg: avgHealth,
+      lapCount,
+      stress: state.sessionStress,
+    };
+
+    // Merge cumulative stress
+    const cumulative = [...state.data.cumulativeStress];
+    for (const sc of state.sessionStress) {
+      const ex = cumulative.find((c) => c.subsystem === sc.subsystem);
+      if (ex) {
+        ex.secondsInWarn += sc.secondsInWarn;
+        ex.secondsInCrit += sc.secondsInCrit;
+      } else {
+        cumulative.push({ ...sc });
+      }
+    }
+
+    // Update lifetime scores
+    const WARN_POINTS_PER_SEC = 1;
+    const CRIT_POINTS_PER_SEC = 5;
+    const subsystemToComponent: Record<string, string> = {
+      "Engine Temp": "Engine",
+      "Exhaust Temp": "Exhaust",
+      "Battery": "Battery",
+      "RPM": "RPM",
+    };
+    const lifetime = state.data.lifetime.map((lt) => {
+      const sc = state.sessionStress.find((c) => subsystemToComponent[c.subsystem] === lt.component);
+      if (!sc) return lt;
+      const added = sc.secondsInWarn * WARN_POINTS_PER_SEC + sc.secondsInCrit * CRIT_POINTS_PER_SEC;
+      const newScore = lt.usageScore + added;
+      return {
+        ...lt,
+        usageScore: newScore,
+        pctRemaining: Math.round(Math.max(0, (lt.budgetScore - newScore) / lt.budgetScore * 100)),
+        lastUpdated: Date.now(),
+      };
+    });
+
+    const newData: ReliabilityData = {
+      sessions: [session, ...state.data.sessions].slice(0, 20),
+      cumulativeStress: cumulative,
+      lifetime,
+    };
+
+    localStorage.setItem(RELIABILITY_KEY, JSON.stringify(newData));
+    set({ data: newData, sessionStress: [], sessionHealthSamples: [], sessionStartTs: null });
+  },
+}));
+
+// ── Diagnosis Store ──────────────────────────────────────────
+interface DiagnosisState {
+  result: DiagnosisResult | null;
+  setResult: (r: DiagnosisResult) => void;
+}
+
+export const useDiagnosisStore = create<DiagnosisState>((set) => ({
+  result: null,
+  setResult: (r) => set({ result: r }),
+}));
+
 // ── Lap Store ────────────────────────────────────────────────
 interface LapRecord {
   lapNumber: number;
@@ -155,3 +304,26 @@ export const useLapStore = create<LapState>((set) => ({
     })),
   selectLap: (n) => set({ selectedLap: n }),
 }));
+
+// ── Log Store ────────────────────────────────────────────────
+export interface LogEntry {
+  timestamp: number;
+  text: string;
+  type: "info" | "error" | "raw";
+}
+
+interface LogState {
+  logs: LogEntry[];
+  addLog: (text: string, type?: LogEntry["type"]) => void;
+  clearLogs: () => void;
+}
+
+export const useLogStore = create<LogState>((set) => ({
+  logs: [],
+  addLog: (text, type = "raw") =>
+    set((s) => ({
+      logs: [{ timestamp: Date.now(), text, type }, ...s.logs].slice(0, 1000),
+    })),
+  clearLogs: () => set({ logs: [] }),
+}));
+

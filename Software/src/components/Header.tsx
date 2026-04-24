@@ -1,5 +1,5 @@
-import { useSerialStore } from "../store";
-import { Wifi, WifiOff, Clock, Flag } from "lucide-react";
+import { useSerialStore, useDiagnosisStore } from "../store";
+import { Wifi, WifiOff, Activity } from "lucide-react";
 import { useTelemetryStore } from "../store";
 
 interface Props {
@@ -16,6 +16,7 @@ function formatLapTime(ms: number): string {
 export default function Header({ pageTitle }: Props) {
   const { config, lastFrameAge, bytesPerSec } = useSerialStore();
   const current = useTelemetryStore((s) => s.current);
+  const diagResult = useDiagnosisStore((s) => s.result);
 
   const connected = config.connected;
   const signalLost = lastFrameAge > 2000 && connected;
@@ -46,6 +47,35 @@ export default function Header({ pageTitle }: Props) {
       </div>
 
       <div className="flex items-center gap-3">
+        {diagResult && (
+          <div
+            className="flex items-center gap-1.5 rounded-full border px-2.5 py-[4px] text-[0.75rem] font-medium"
+            style={{
+              borderColor:
+                diagResult.healthPct >= 70
+                  ? "#06d6a033"
+                  : diagResult.healthPct >= 40
+                  ? "#ffb70333"
+                  : "#e6394633",
+              background:
+                diagResult.healthPct >= 70
+                  ? "var(--accent-green-dim)"
+                  : diagResult.healthPct >= 40
+                  ? "var(--accent-amber-dim)"
+                  : "#e6394615",
+              color:
+                diagResult.healthPct >= 70
+                  ? "var(--accent-green)"
+                  : diagResult.healthPct >= 40
+                  ? "var(--accent-amber)"
+                  : "var(--accent-red)",
+            }}
+          >
+            <Activity size={12} />
+            <span className="mono">{diagResult.healthPct}%</span>
+          </div>
+        )}
+
         {connected && !signalLost && (
           <span className="mono text-[0.72rem] text-[var(--text-muted)]">{bytesPerSec} B/s</span>
         )}

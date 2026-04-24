@@ -76,7 +76,75 @@ export interface AutonomyCatalogCommand {
   created_by_user_id: number | null;
 }
 
-export type Page = "dashboard" | "safety" | "can" | "laps" | "autonomy" | "settings";
+// ── Long-term reliability ─────────────────────────────────────
+
+export interface StressCounter {
+  subsystem: string;
+  secondsInWarn: number;
+  secondsInCrit: number;
+}
+
+export interface SessionSummary {
+  sessionId: string;
+  startTs: number;
+  endTs: number;
+  peakEngineTemp: number | null;
+  peakExhaustTemp: number | null;
+  minBatteryV: number | null;
+  peakRpm: number;
+  avgRpm: number;
+  peakGLat: number;
+  peakGLon: number;
+  healthPctAvg: number;
+  lapCount: number;
+  stress: StressCounter[];
+}
+
+export interface ComponentLifetime {
+  component: string;
+  usageScore: number;         // accumulated stress points
+  budgetScore: number;        // total budget before service recommended
+  pctRemaining: number;       // 0–100
+  lastUpdated: number;
+}
+
+export interface ReliabilityData {
+  sessions: SessionSummary[]; // up to 20
+  cumulativeStress: StressCounter[];
+  lifetime: ComponentLifetime[];
+}
+
+export interface SubsystemHealth {
+  name: string;
+  value: number;       // 0–100
+  status: "ok" | "warn" | "crit";
+  detail: string;
+}
+
+export interface DiagPrediction {
+  id: string;
+  subsystem: string;
+  message: string;
+  etaSec: number | null; // estimated seconds until threshold breach; null = indeterminate
+  severity: "info" | "warning" | "critical";
+}
+
+export interface DiagRecommendation {
+  id: string;
+  command: string;
+  rationale: string;
+  urgency: "low" | "medium" | "high";
+}
+
+export interface DiagnosisResult {
+  healthPct: number;
+  subsystems: SubsystemHealth[];
+  predictions: DiagPrediction[];
+  recommendations: DiagRecommendation[];
+  updatedAt: number;
+}
+
+export type Page = "dashboard" | "safety" | "can" | "laps" | "autonomy" | "settings" | "terminal";
 
 export interface SerialConfig {
   port: string;

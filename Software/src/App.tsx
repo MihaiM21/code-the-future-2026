@@ -8,6 +8,7 @@ import CanBus from "./pages/CanBus";
 import Sessions from "./pages/Sessions";
 import AutonomyCommands from "./pages/AutonomyCommands";
 import Settings from "./pages/Settings";
+import SerialTerminal from "./pages/SerialTerminal";
 import type { Page } from "./types";
 import { useSerialStore } from "./store";
 import { useAuthStore } from "./store/auth";
@@ -19,6 +20,7 @@ const PAGE_TITLES: Record<Page, string> = {
   can: "CAN Bus Monitor",
   laps: "Session Analytics",
   autonomy: "Autonomy Commands",
+  terminal: "Serial Terminal",
   settings: "Connection Settings",
 };
 
@@ -83,6 +85,7 @@ function App() {
         {page === "can"       && <CanBus />}
         {page === "laps"      && <Sessions />}
         {page === "autonomy"  && <AutonomyCommands />}
+        {page === "terminal"  && <SerialTerminal />}
         {page === "settings"  && <Settings />}
       </main>
     </div>
