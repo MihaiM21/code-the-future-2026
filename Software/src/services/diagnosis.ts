@@ -262,6 +262,16 @@ export function evaluateDiagnosis(
     });
   }
 
+  // Ambient air above 30C while fan is off
+  if (config.autoFanEnabled && frame.air_temp > 30 && frame.fan_active !== true) {
+    recommendations.push({
+      id: "rec-fan-on-air-temp",
+      command: "AUTONOMY:FAN_ON",
+      rationale: `Air temp at ${frame.air_temp.toFixed(1)}°C — turn fan on for additional cooling`,
+      urgency: frame.air_temp > 35 ? "high" : "medium",
+    });
+  }
+
   // Exhaust nearing limit
   if (exhaustTemp !== undefined) {
     const exhaustPct = exhaustTemp / config.exhaustTempHigh;

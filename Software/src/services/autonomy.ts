@@ -137,6 +137,7 @@ export function evaluateAutonomyFrame(frame: TelemetryFrame): void {
   const candidates: CandidateRule[] = [];
 
   const engineTemp = frame.engine_temp ?? frame.coolant_temp ?? frame.air_temp;
+  const airTemp = frame.air_temp;
   const exhaustTemp = frame.exhaust_temp;
 
   if (config.autoFanEnabled) {
@@ -166,6 +167,34 @@ export function evaluateAutonomyFrame(frame: TelemetryFrame): void {
       }
     } else if (engineTemp <= config.fanThreshold - 1.5) {
       clearRule(ruleId);
+    }
+
+    const airTempRuleId = "ambient-air-fan-suggestion";
+    const hotAmbientAir = typeof airTemp === "number" && airTemp > 30 && frame.fan_active !== true;
+
+    if (hotAmbientAir) {
+      if (canRearm(airTempRuleId)) {
+        const commands = ["AUTONOMY:FAN_ON"];
+        candidates.push({
+          action: buildAction({
+            ruleId: airTempRuleId,
+            ts: frame.ts,
+            level: config.autonomyLevel,
+            domain: "safety",
+            severity: severityForDelta(airTemp - 30),
+            title: "Ambient cooling suggestion",
+            rationale: `Air temperature ${airTemp.toFixed(1)}°C is above 30.0°C. Turn the fan on to improve cooling.`,
+            trigger: `air temperature ${airTemp.toFixed(1)}°C`,
+            suggestedCommands: commands,
+            command: commands[0],
+            requiresApproval: config.autonomyLevel < 3,
+          }),
+          autoSend: config.autonomyLevel >= 3,
+        });
+        markRuleTriggered(airTempRuleId);
+      }
+    } else if (typeof airTemp === "number" && airTemp <= 28) {
+      clearRule(airTempRuleId);
     }
   }
 
