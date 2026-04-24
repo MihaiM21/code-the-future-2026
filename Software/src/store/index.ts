@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { TelemetryFrame, AlertEntry, SerialConfig, SerialPortInfo } from "../types";
+import type { TelemetryFrame, AlertEntry, SerialConfig, SerialPortInfo, AutonomyAction, AutonomyLevel } from "../types";
 
 const RING_BUFFER_SIZE = 600; // ~60 seconds at 10 fps
 
@@ -59,33 +59,71 @@ export const useSerialStore = create<SerialState>((set) => ({
 
 // ── Config Store ─────────────────────────────────────────────
 interface ConfigState {
-  autonomyLevel: number;
+  autonomyLevel: AutonomyLevel;
   fanThreshold: number;      // °C
+  exhaustTempHigh: number;   // °C
   batteryLowV: number;       // V
   rpmLimit: number;
   autoFanEnabled: boolean;
+  autoExhaustCleanupEnabled: boolean;
   autoBatteryAlertEnabled: boolean;
-  setAutonomyLevel: (n: number) => void;
+  autoRpmAdvisoryEnabled: boolean;
+  setAutonomyLevel: (n: AutonomyLevel) => void;
   setFanThreshold: (n: number) => void;
+  setExhaustTempHigh: (n: number) => void;
   setBatteryLowV: (n: number) => void;
   setRpmLimit: (n: number) => void;
   toggleAutoFan: () => void;
+  toggleAutoExhaustCleanup: () => void;
   toggleAutoBatteryAlert: () => void;
+  toggleAutoRpmAdvisory: () => void;
 }
 
 export const useConfigStore = create<ConfigState>((set) => ({
   autonomyLevel: 1,
   fanThreshold: 95,
+  exhaustTempHigh: 760,
   batteryLowV: 11.5,
   rpmLimit: 9000,
   autoFanEnabled: true,
+  autoExhaustCleanupEnabled: true,
   autoBatteryAlertEnabled: true,
+  autoRpmAdvisoryEnabled: true,
   setAutonomyLevel: (n) => set({ autonomyLevel: n }),
   setFanThreshold: (n) => set({ fanThreshold: n }),
+  setExhaustTempHigh: (n) => set({ exhaustTempHigh: n }),
   setBatteryLowV: (n) => set({ batteryLowV: n }),
   setRpmLimit: (n) => set({ rpmLimit: n }),
   toggleAutoFan: () => set((s) => ({ autoFanEnabled: !s.autoFanEnabled })),
+  toggleAutoExhaustCleanup: () => set((s) => ({ autoExhaustCleanupEnabled: !s.autoExhaustCleanupEnabled })),
   toggleAutoBatteryAlert: () => set((s) => ({ autoBatteryAlertEnabled: !s.autoBatteryAlertEnabled })),
+  toggleAutoRpmAdvisory: () => set((s) => ({ autoRpmAdvisoryEnabled: !s.autoRpmAdvisoryEnabled })),
+}));
+
+// ── Autonomy Queue ───────────────────────────────────────────
+interface AutonomyState {
+  actions: AutonomyAction[];
+  addAction: (action: AutonomyAction) => void;
+  updateAction: (id: string, patch: Partial<AutonomyAction>) => void;
+  removeAction: (id: string) => void;
+  setActions: (actions: AutonomyAction[]) => void;
+}
+
+export const useAutonomyStore = create<AutonomyState>((set) => ({
+  actions: [],
+  addAction: (action) =>
+    set((state) => ({
+      actions: [action, ...state.actions.filter((item) => item.id !== action.id)].slice(0, 40),
+    })),
+  updateAction: (id, patch) =>
+    set((state) => ({
+      actions: state.actions.map((action) => (action.id === id ? { ...action, ...patch } : action)),
+    })),
+  removeAction: (id) =>
+    set((state) => ({
+      actions: state.actions.filter((action) => action.id !== id),
+    })),
+  setActions: (actions) => set({ actions }),
 }));
 
 // ── Lap Store ────────────────────────────────────────────────

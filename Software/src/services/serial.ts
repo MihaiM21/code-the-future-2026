@@ -2,6 +2,9 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type { TelemetryFrame, SerialPortInfo } from "../types";
 import { useTelemetryStore, useAlertStore, useSerialStore, useLapStore } from "../store";
+import { useAuthStore } from "../store/auth";
+import { evaluateAutonomyFrame } from "./autonomy";
+import { sendSerialCommand } from "./command";
 
 let unlistenFn: (() => void) | null = null;
 let byteCount = 0;
@@ -47,8 +50,13 @@ export async function disconnectSerial(): Promise<void> {
 
 // ── Send command to RPi via ESP32 ─────────────────────────────
 export async function sendCommand(cmd: string): Promise<void> {
+  const role = useAuthStore.getState().user?.role;
+  if (role !== "authorized_user") {
+    throw new Error("Only Authorized Users can send control commands.");
+  }
+
   try {
-    await invoke("send_command", { cmd });
+    await sendSerialCommand(cmd);
   } catch (e) {
     console.error("send_command error:", e);
   }
@@ -72,68 +80,56 @@ async function startListening() {
     if (frame.alerts && frame.alerts.length > 0) {
       frame.alerts.forEach((a) => useAlertStore.getState().addAlert(a));
     }
+
+    evaluateAutonomyFrame(frame);
   });
 }
 
 // ── Demo simulator (used when no hardware connected) ──────────
 let demoIntervalId: ReturnType<typeof setInterval> | null = null;
-let demoLapFrames: TelemetryFrame[] = [];
 let demoLapNumber = 1;
+let demoLapStartTs = 0;
 
 export function startDemo() {
   if (demoIntervalId) return;
   useSerialStore.getState().setConfig({ port: "DEMO", baud: 0, connected: true });
+  demoLapStartTs = Date.now();
 
   let t = 0;
   demoIntervalId = setInterval(() => {
     t += 0.1;
-    const rpm = 4000 + 4000 * Math.abs(Math.sin(t * 0.5));
-    const speed = 80 + 130 * Math.abs(Math.sin(t * 0.3));
-    const throttle = 40 + 60 * Math.abs(Math.sin(t * 0.5));
-    const brake = throttle < 50 ? 80 - throttle : 0;
-    const gear = Math.min(8, Math.max(1, Math.round(speed / 40)));
-    const temp_engine = 88 + 12 * Math.abs(Math.sin(t * 0.05));
-    const temp_water = 82 + 8 * Math.abs(Math.sin(t * 0.04));
-    const temp_oil = 95 + 15 * Math.abs(Math.sin(t * 0.03));
-    const lapTime = (t % 90) * 1000;
+
+    const throttleRaw = Math.sin(t * 0.5);
+    const brakeRaw = Math.sin(t * 0.3);
+    // Smooth 0-100 pedal values so the dashboard bars animate visibly
+    const throttle = throttleRaw > 0 ? Math.round(throttleRaw * 100) : 0;
+    const brake = throttleRaw <= 0 && brakeRaw > 0.3 ? Math.round(brakeRaw * 100) : 0;
 
     const frame: TelemetryFrame = {
       ts: Date.now(),
-      rpm: Math.round(rpm),
-      speed: Math.round(speed),
-      throttle: Math.round(throttle),
-      brake: Math.round(brake),
-      gear,
-      temp_engine: +temp_engine.toFixed(1),
-      temp_water: +temp_water.toFixed(1),
-      temp_oil: +temp_oil.toFixed(1),
-      temp_ambient: 28.5,
-      battery_voltage: 12.6 + 0.4 * Math.sin(t * 0.1),
-      battery_current: 35 + 20 * Math.abs(Math.sin(t * 0.2)),
-      battery_fault: false,
-      fuel_level: Math.max(0, 80 - t * 0.05),
-      lap_time: lapTime,
-      lap_number: demoLapNumber,
+      air_temp: 22 + 5 * Math.sin(t * 0.1),
+      air_quality: 45 + 20 * Math.abs(Math.sin(t * 0.2)),
+      pressure: 1013 + 2 * Math.sin(t * 0.05),
       g_lat: 2.2 * Math.sin(t * 0.7),
       g_lon: 1.5 * Math.sin(t * 0.5),
       g_vert: 1.0 + 0.3 * Math.sin(t * 2),
-      can_errors: 0,
-      autonomy_level: 1,
-      fan_active: temp_engine > 96,
-      drs_active: speed > 180,
-      alerts: [],
+      throttle,
+      brake,
+      rpm: Math.round(4000 + 4000 * Math.abs(Math.sin(t * 0.5))),
     };
 
-    demoLapFrames.push(frame);
-    useTelemetryStore.getState().pushFrame(frame);
     lastFrameTs = Date.now();
     useSerialStore.getState().setLastFrameAge(0);
     useSerialStore.getState().setBytesPerSec(Math.round(JSON.stringify(frame).length));
 
+    useTelemetryStore.getState().pushFrame(frame);
+    useLapStore.getState().pushLapFrame(frame);
+
+    const lapTime = Date.now() - demoLapStartTs;
     if (lapTime > 85000) {
       useLapStore.getState().finalizeLap(demoLapNumber, lapTime);
       demoLapNumber++;
-      demoLapFrames = [];
+      demoLapStartTs = Date.now();
     }
   }, 100);
 }

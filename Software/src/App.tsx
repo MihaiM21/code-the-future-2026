@@ -1,20 +1,24 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
+import LoginPage from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Safety from "./pages/Safety";
 import CanBus from "./pages/CanBus";
-import Laps from "./pages/Laps";
+import Sessions from "./pages/Sessions";
+import AutonomyCommands from "./pages/AutonomyCommands";
 import Settings from "./pages/Settings";
 import type { Page } from "./types";
 import { useSerialStore } from "./store";
+import { useAuthStore } from "./store/auth";
 import { AlertTriangle } from "lucide-react";
 
 const PAGE_TITLES: Record<Page, string> = {
   dashboard: "Live Dashboard",
   safety: "Safety & Autonomy",
   can: "CAN Bus Monitor",
-  laps: "Lap Analytics",
+  laps: "Session Analytics",
+  autonomy: "Autonomy Commands",
   settings: "Connection Settings",
 };
 
@@ -22,6 +26,26 @@ function App() {
   const [page, setPage] = useState<Page>("dashboard");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { config, lastFrameAge } = useSerialStore();
+  const { isAuthenticated, login, logout } = useAuthStore();
+
+  // Check localStorage on mount to restore auth state
+  useEffect(() => {
+    const stored = localStorage.getItem("auth-store");
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed.state?.user) {
+          // Auth state is already loaded by Zustand persistence
+        }
+      } catch (e) {
+        console.error("Failed to restore auth state", e);
+      }
+    }
+  }, []);
+
+  if (!isAuthenticated) {
+    return <LoginPage onLoginSuccess={(user) => login(user)} />;
+  }
 
   const signalLost = config.connected && lastFrameAge > 2000;
 
@@ -39,6 +63,7 @@ function App() {
         onNavigate={setPage}
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed((v) => !v)}
+        onLogout={logout}
       />
       <Header pageTitle={PAGE_TITLES[page]} />
 
@@ -56,7 +81,8 @@ function App() {
         {page === "dashboard" && <Dashboard />}
         {page === "safety"    && <Safety />}
         {page === "can"       && <CanBus />}
-        {page === "laps"      && <Laps />}
+        {page === "laps"      && <Sessions />}
+        {page === "autonomy"  && <AutonomyCommands />}
         {page === "settings"  && <Settings />}
       </main>
     </div>

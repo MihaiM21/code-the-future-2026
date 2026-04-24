@@ -35,15 +35,11 @@ export default function Header({ pageTitle }: Props) {
         {current && (
           <>
             <div className="flex items-center gap-1.5 text-[0.78rem]">
-              <Flag size={13} className="text-[var(--text-muted)]" />
-              <span className="text-[0.68rem] font-semibold tracking-[0.06em] text-[var(--text-muted)]">LAP</span>
-              <span className="mono text-[0.85rem] font-semibold text-[var(--text-primary)]">{current.lap_number}</span>
+              <span className="text-[0.78rem] text-[var(--text-muted)]">Air: {current.air_temp.toFixed(1)}°C</span>
             </div>
             <div className="h-[18px] w-px bg-[var(--border)]" />
             <div className="flex items-center gap-1.5 text-[0.78rem]">
-              <Clock size={13} className="text-[var(--text-muted)]" />
-              <span className="text-[0.68rem] font-semibold tracking-[0.06em] text-[var(--text-muted)]">TIME</span>
-              <span className="mono text-[0.85rem] font-semibold text-[var(--text-primary)]">{formatLapTime(current.lap_time)}</span>
+              <span className="text-[0.78rem] text-[var(--text-muted)]">Pressure: {current.pressure.toFixed(0)} hPa</span>
             </div>
           </>
         )}

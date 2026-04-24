@@ -1,3 +1,3 @@
 fn main() {
-    aems_lib::run();
+    apex_lib::run();
 }

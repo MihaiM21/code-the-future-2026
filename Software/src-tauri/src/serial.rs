@@ -2,6 +2,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter};
+use crate::influx::InfluxState;
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -141,6 +142,7 @@ pub fn connect_serial(
     baud: u32,
     app: AppHandle,
     state: tauri::State<SerialState>,
+    influx: tauri::State<InfluxState>,
 ) -> Result<(), String> {
     let serial = serialport::new(&port, baud)
         .timeout(std::time::Duration::from_millis(5000))
@@ -159,12 +161,14 @@ pub fn connect_serial(
 
     // Spawn a reader thread
     let app_clone = app.clone();
+    let influx_state = influx.inner().clone();
     thread::spawn(move || {
         let reader = BufReader::new(serial);
         for line in reader.lines() {
             match line {
                 Ok(json) => {
                     if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
+                        influx_state.enqueue(&value);
                         let _ = app_clone.emit("telemetry-update", value);
                     }
                 }

@@ -18,5 +18,8 @@ Software/pnpm-debug.log*
 .DS_Store
 Thumbs.db
 
-apex.db
 CLAUDE.md
+apex.db
+.env
+
+Firmware_ESP_32/config.h

@@ -1,35 +1,27 @@
 export interface TelemetryFrame {
   ts: number;
-  // Powertrain
+  // Environmental
+  air_temp: number;     // °C
+  air_quality: number;  // AQI or ppm
+  pressure: number;     // hPa or similar
+  engine_temp?: number;  // °C, optional if firmware provides it
+  coolant_temp?: number; // °C, optional if firmware provides it
+  exhaust_temp?: number; // °C, optional if firmware provides it
+  battery_v?: number;    // V, optional if firmware provides it
+  // IMU (MPU6050)
+  g_lat: number;        // G (lateral acceleration)
+  g_lon: number;        // G (longitudinal acceleration)
+  g_vert: number;       // G (vertical acceleration)
+  // Control inputs (binary)
+  throttle: number;     // 0 or 1
+  brake: number;        // 0 or 1
+  // Engine
   rpm: number;
-  speed: number;        // km/h
-  throttle: number;     // 0–100 %
-  brake: number;        // 0–100 %
-  gear: number;         // -1=R, 0=N, 1-8
-  // Temperatures
-  temp_engine: number;  // °C
-  temp_water: number;
-  temp_oil: number;
-  temp_ambient: number;
-  // Electrical
-  battery_voltage: number;   // V
-  battery_current: number;   // A
-  battery_fault: boolean;
-  // Fuel
-  fuel_level: number;   // %
-  // Lap
-  lap_time: number;     // ms
-  lap_number: number;
-  // Inertia
-  g_lat: number;        // G
-  g_lon: number;
-  g_vert: number;
-  // System
-  can_errors: number;
-  autonomy_level: number;  // 0-3
-  fan_active: boolean;
-  drs_active: boolean;
-  alerts: AlertEntry[];
+  // Optional decoded status and diagnostics
+  can_errors?: number;
+  fan_active?: boolean;
+  drs_active?: boolean;
+  alerts?: AlertEntry[];
 }
 
 export interface AlertEntry {
@@ -40,7 +32,51 @@ export interface AlertEntry {
   system: string;
 }
 
-export type Page = "dashboard" | "safety" | "can" | "laps" | "settings";
+export type AutonomyLevel = 1 | 2 | 3 | 4;
+export type AutonomyActionStatus = "pending" | "approved" | "sent" | "rejected" | "blocked";
+export type AutonomyDomain = "safety" | "performance";
+
+export interface AutonomyAction {
+  id: string;
+  ruleId: string;
+  ts: number;
+  level: AutonomyLevel;
+  domain: AutonomyDomain;
+  severity: AlertEntry["severity"];
+  title: string;
+  rationale: string;
+  trigger: string;
+  suggestedCommands: string[];
+  command: string;
+  requiresApproval: boolean;
+  status: AutonomyActionStatus;
+}
+
+export interface PersistedAutonomyCommand {
+  id: string;
+  rule_id: string;
+  ts: number;
+  level: number;
+  domain: string;
+  severity: AlertEntry["severity"];
+  title: string;
+  rationale: string;
+  trigger: string;
+  suggested_commands: string[];
+  command: string;
+  requires_approval: boolean;
+  status: AutonomyActionStatus;
+  created_by_user_id: number | null;
+}
+
+export interface AutonomyCatalogCommand {
+  id: number;
+  command: string;
+  source: string;
+  created_by_user_id: number | null;
+}
+
+export type Page = "dashboard" | "safety" | "can" | "laps" | "autonomy" | "settings";
 
 export interface SerialConfig {
   port: string;
@@ -58,4 +94,27 @@ export interface SerialPortInfo {
   pid: number | null;
   isUsb: boolean;
   isLikelyEsp: boolean;
+}
+
+export interface InfluxStatus {
+  enabled: boolean;
+  url: string | null;
+  org: string | null;
+  bucket: string | null;
+  measurement: string | null;
+  lastWriteError: string | null;
+  lastWriteSuccess: number | null;
+}
+
+export interface InfluxTelemetryPoint {
+  ts: number;
+  air_temp: number | null;
+  air_quality: number | null;
+  pressure: number | null;
+  g_lat: number | null;
+  g_lon: number | null;
+  g_vert: number | null;
+  throttle: number | null;
+  brake: number | null;
+  rpm: number | null;
 }
