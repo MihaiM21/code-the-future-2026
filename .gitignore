@@ -17,3 +17,6 @@ Software/pnpm-debug.log*
 # OS artifacts
 .DS_Store
 Thumbs.db
+
+apex.db
+CLAUDE.md
