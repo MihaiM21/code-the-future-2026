@@ -14,6 +14,23 @@ let byteCount = 0;
 let lastSecTs = Date.now();
 let lastFrameTs = Date.now();
 
+// Synthetic RPM — used as fallback when hardware doesn't send rpm
+let syntheticRpmT = 0;
+let syntheticRpmValue = 4000;
+let syntheticRpmInterval: ReturnType<typeof setInterval> | null = null;
+
+function startSyntheticRpm() {
+  if (syntheticRpmInterval) return;
+  syntheticRpmInterval = setInterval(() => {
+    syntheticRpmT += 0.1;
+    syntheticRpmValue = Math.round(4000 + 4000 * Math.abs(Math.sin(syntheticRpmT * 0.5)));
+  }, 100);
+}
+
+function stopSyntheticRpm() {
+  if (syntheticRpmInterval) { clearInterval(syntheticRpmInterval); syntheticRpmInterval = null; }
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
@@ -58,7 +75,7 @@ function toTelemetryFrame(payload: unknown): TelemetryFrame | null {
   const gLon = firstDefined(asFiniteNumber(payload.g_lon), accelY !== undefined ? accelY / G : undefined, 0);
   const gVert = firstDefined(asFiniteNumber(payload.g_vert), accelZ !== undefined ? accelZ / G : undefined, 1);
 
-  const rpm = firstDefined(asFiniteNumber(payload.rpm), 0);
+  const rpm = firstDefined(asFiniteNumber(payload.rpm), syntheticRpmValue);
 
   const throttleObj = isRecord(payload.throttle) ? payload.throttle : undefined;
   const throttle = firstDefined(
@@ -132,6 +149,7 @@ export async function connectSerial(port: string, baud: number): Promise<void> {
     useSerialStore.getState().setConfig({ port, baud, connected: true });
     useReliabilityStore.getState().startSession();
     startReliabilityTracking();
+    startSyntheticRpm();
     await startListening();
   } catch (e) {
     throw new Error(`Failed to connect: ${e}`);
@@ -145,6 +163,7 @@ export async function disconnectSerial(): Promise<void> {
   } catch (_) {/* ignore */}
   finalizeReliabilitySession();
   stopReliabilityTracking();
+  stopSyntheticRpm();
   useSerialStore.getState().setConfig({ connected: false });
   if (unlistenAll) { unlistenAll(); unlistenAll = null; }
 }

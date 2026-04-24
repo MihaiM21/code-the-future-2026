@@ -158,7 +158,7 @@ export default function AutonomyCommands() {
 
   return (
     <div className="page-content h-full">
-      <div className="card h-190 mb-3.5">
+      <div className="card h-197 mb-3.5">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="card-header-row">
