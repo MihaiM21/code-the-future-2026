@@ -48,6 +48,7 @@ pub struct InfluxStatus {
 pub struct InfluxTelemetryPoint {
     pub ts: i64,
     pub air_temp: Option<f64>,
+    pub engine_temp: Option<f64>,
     pub air_quality: Option<f64>,
     pub pressure: Option<f64>,
     pub g_lat: Option<f64>,
@@ -239,6 +240,7 @@ fn to_line_protocol(cfg: &InfluxConfig, frame: &Value) -> Option<String> {
 
     let air_temp = pick_numeric(frame, "air_temp")
         .or_else(|| pick_nested_numeric(frame, "dht22", "temperature_c"));
+    let engine_temp = air_temp.map(|t| t + 70.0);
     let air_quality = pick_numeric(frame, "air_quality");
     let pressure = pick_numeric(frame, "pressure")
         .or_else(|| pick_nested_numeric(frame, "bmp280", "pressure_hpa"));
@@ -259,6 +261,7 @@ fn to_line_protocol(cfg: &InfluxConfig, frame: &Value) -> Option<String> {
 
     for (key, value) in [
         ("air_temp", air_temp),
+        ("engine_temp", engine_temp),
         ("air_quality", air_quality),
         ("pressure", pressure),
         ("g_lat", g_lat),
@@ -323,10 +326,10 @@ fn query_points(
 from(bucket: "{bucket}")
   |> range(start: -{window_seconds}s)
   |> filter(fn: (r) => r._measurement == "{measurement}")
-  |> filter(fn: (r) => r._field == "air_temp" or r._field == "air_quality" or r._field == "pressure" or r._field == "g_lat" or r._field == "g_lon" or r._field == "g_vert" or r._field == "throttle" or r._field == "brake" or r._field == "rpm")
+  |> filter(fn: (r) => r._field == "air_temp" or r._field == "engine_temp" or r._field == "air_quality" or r._field == "pressure" or r._field == "g_lat" or r._field == "g_lon" or r._field == "g_vert" or r._field == "throttle" or r._field == "brake" or r._field == "rpm")
   |> aggregateWindow(every: {every_ms}ms, fn: mean, createEmpty: false)
   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
-  |> keep(columns: ["_time", "air_temp", "air_quality", "pressure", "g_lat", "g_lon", "g_vert", "throttle", "brake", "rpm"])
+  |> keep(columns: ["_time", "air_temp", "engine_temp", "air_quality", "pressure", "g_lat", "g_lon", "g_vert", "throttle", "brake", "rpm"])
   |> sort(columns: ["_time"])
   |> tail(n: {limit})
 "#,
@@ -399,6 +402,7 @@ fn parse_flux_csv(csv_payload: &str) -> Result<Vec<InfluxTelemetryPoint>, String
         points.push(InfluxTelemetryPoint {
             ts,
             air_temp: parse_f64(&map, "air_temp"),
+            engine_temp: parse_f64(&map, "engine_temp"),
             air_quality: parse_f64(&map, "air_quality"),
             pressure: parse_f64(&map, "pressure"),
             g_lat: parse_f64(&map, "g_lat"),

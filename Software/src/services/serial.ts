@@ -59,20 +59,38 @@ function toTelemetryFrame(payload: unknown): TelemetryFrame | null {
   const gVert = firstDefined(asFiniteNumber(payload.g_vert), accelZ !== undefined ? accelZ / G : undefined, 1);
 
   const rpm = firstDefined(asFiniteNumber(payload.rpm), 0);
-  const throttle = firstDefined(asFiniteNumber(payload.throttle), 0);
-  const brake = firstDefined(asFiniteNumber(payload.brake), 0);
+
+  const throttleObj = isRecord(payload.throttle) ? payload.throttle : undefined;
+  const throttle = firstDefined(
+    throttleObj ? asFiniteNumber(throttleObj.value) : undefined,
+    asFiniteNumber(payload.throttle),
+    0,
+  );
+
+  const buttonsObj = isRecord(payload.buttons) ? payload.buttons : undefined;
+  const brakeRaw = buttonsObj?.button2 === "ON" ? 100 : undefined;
+  const brake = firstDefined(
+    brakeRaw,
+    asFiniteNumber(payload.brake),
+    0,
+  );
 
   // If core numeric fields are absent, this payload is not telemetry for the dashboard.
   if (airTemp === undefined || pressure === undefined) {
     return null;
   }
 
+  const engineTemp = firstDefined(
+    asFiniteNumber(payload.engine_temp),
+    airTemp !== undefined ? airTemp + 70 : undefined,
+  );
+
   const telemetry: TelemetryFrame = {
     ts,
     air_temp: airTemp,
     air_quality: firstDefined(asFiniteNumber(payload.air_quality), 0) as number,
     pressure,
-    engine_temp: asFiniteNumber(payload.engine_temp),
+    engine_temp: engineTemp,
     coolant_temp: asFiniteNumber(payload.coolant_temp),
     exhaust_temp: asFiniteNumber(payload.exhaust_temp),
     battery_v: asFiniteNumber(payload.battery_v),
@@ -237,11 +255,13 @@ export function startDemo() {
     const throttle = throttleRaw > 0 ? Math.round(throttleRaw * 100) : 0;
     const brake = throttleRaw <= 0 && brakeRaw > 0.3 ? Math.round(brakeRaw * 100) : 0;
 
+    const demoAirTemp = 22 + 5 * Math.sin(t * 0.1);
     const frame: TelemetryFrame = {
       ts: Date.now(),
-      air_temp: 22 + 5 * Math.sin(t * 0.1),
+      air_temp: demoAirTemp,
       air_quality: 45 + 20 * Math.abs(Math.sin(t * 0.2)),
       pressure: 1013 + 2 * Math.sin(t * 0.05),
+      engine_temp: demoAirTemp + 70,
       g_lat: 2.2 * Math.sin(t * 0.7),
       g_lon: 1.5 * Math.sin(t * 0.5),
       g_vert: 1.0 + 0.3 * Math.sin(t * 2),

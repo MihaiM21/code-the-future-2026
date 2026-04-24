@@ -5,6 +5,7 @@ import { sendSerialCommand } from "./command";
 import { saveAutonomyActionToDb } from "./autonomyDb";
 import {
   BATTERY_PROTECTION_COMMANDS,
+  COOLING_RECOVERY_COMMANDS,
   COOLING_RESPONSE_COMMANDS,
   EXHAUST_CLEANOUT_COMMANDS,
   RPM_ADVISORY_COMMANDS,
@@ -18,14 +19,21 @@ type CandidateRule = {
 const ruleCooldowns = new Map<string, number>();
 const REARM_DELAY_MS = 15000;
 
+let fanOnSent = false;
+
 function makeId(ruleId: string): string {
   return `${ruleId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function pickRandom<T>(arr: readonly T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
 }
 
 function buildAction(params: Omit<AutonomyAction, "id" | "status" | "requiresApproval"> & { requiresApproval: boolean }): AutonomyAction {
   return {
     id: makeId(params.ruleId),
     ...params,
+    command: pickRandom(params.suggestedCommands),
     status: "pending",
     requiresApproval: params.requiresApproval,
   };
@@ -110,6 +118,8 @@ async function dispatchAutonomyAction(actionId: string, autoApproved = false): P
 
   try {
     await sendSerialCommand(command);
+    if (command.includes("FAN_ON")) fanOnSent = true;
+    if (command.includes("FAN_OFF")) fanOnSent = false;
     autonomyStore.updateAction(actionId, { status: "sent", command });
     queuePersist(actionId);
     useAlertStore.getState().addAlert({
@@ -142,7 +152,7 @@ export function evaluateAutonomyFrame(frame: TelemetryFrame): void {
 
   if (config.autoFanEnabled) {
     const ruleId = "cooling-response";
-    const active = typeof engineTemp === "number" && engineTemp >= config.fanThreshold;
+    const active = typeof engineTemp === "number" && engineTemp >= config.fanThreshold && !fanOnSent && frame.fan_active !== true;
 
     if (active) {
       if (canRearm(ruleId)) {
@@ -169,8 +179,39 @@ export function evaluateAutonomyFrame(frame: TelemetryFrame): void {
       clearRule(ruleId);
     }
 
+    const fanOffRuleId = "cooling-recovery";
+    const fanActive = frame.fan_active === true;
+    const tempBelowThreshold =
+      typeof engineTemp === "number" && engineTemp <= config.fanThreshold - 1.5;
+
+    if (fanActive && tempBelowThreshold) {
+      if (canRearm(fanOffRuleId)) {
+        const commands = [...COOLING_RECOVERY_COMMANDS];
+        candidates.push({
+          action: buildAction({
+            ruleId: fanOffRuleId,
+            ts: frame.ts,
+            level: config.autonomyLevel,
+            domain: "safety",
+            severity: "info",
+            title: "Cooling recovery",
+            rationale: `Temperature ${engineTemp.toFixed(1)}°C is below the ${(config.fanThreshold - 1.5).toFixed(1)}°C recovery threshold. Turn the fan off.`,
+            trigger: `engine temperature ${engineTemp.toFixed(1)}°C`,
+            suggestedCommands: commands,
+            command: commands[0],
+            requiresApproval: config.autonomyLevel < 3,
+          }),
+          autoSend: config.autonomyLevel >= 3,
+        });
+        markRuleTriggered(fanOffRuleId);
+      }
+    } else if (!fanActive) {
+      fanOnSent = false;
+      clearRule(fanOffRuleId);
+    }
+
     const airTempRuleId = "ambient-air-fan-suggestion";
-    const hotAmbientAir = typeof airTemp === "number" && airTemp > 30 && frame.fan_active !== true;
+    const hotAmbientAir = typeof airTemp === "number" && airTemp > 30 && !fanOnSent && frame.fan_active !== true;
 
     if (hotAmbientAir) {
       if (canRearm(airTempRuleId)) {
