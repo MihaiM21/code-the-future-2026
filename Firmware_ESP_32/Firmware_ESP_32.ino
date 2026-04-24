@@ -1,5 +1,6 @@
 #include <WiFi.h>
 #include <WebSocketsClient.h>
+#include "config.h"
 
 WebSocketsClient webSocket;
 

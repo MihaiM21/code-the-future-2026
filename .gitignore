@@ -21,3 +21,5 @@ Thumbs.db
 CLAUDE.md
 apex.db
 .env
+
+Firmware_ESP_32/config.h
