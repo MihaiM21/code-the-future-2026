@@ -1,11 +1,6 @@
 #include <WiFi.h>
 #include <WebSocketsClient.h>
 
-const char* ssid     = "14T";
-const char* password = "sexroom23";
-const char* host     = "10.90.32.165";
-const int   port     = 8765;
-
 WebSocketsClient webSocket;
 
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
