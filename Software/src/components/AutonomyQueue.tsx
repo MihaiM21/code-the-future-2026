@@ -20,13 +20,14 @@ const statusLabel: Record<string, string> = {
 export default function AutonomyQueue() {
   const actions = useAutonomyStore((state) => state.actions);
   const isAuthorized = useAuthStore((state) => state.isAuthorized);
+  const pendingActions = actions.filter((action) => action.status === "pending");
 
   return (
     <div className="card flex min-h-0 flex-1 flex-col">
       <div className="card-header-row">
         <Bot size={16} style={{ color: "var(--accent-cyan)" }} />
         <h3>Autonomy Queue</h3>
-        <span className="badge badge-cyan" style={{ marginLeft: "auto" }}>{actions.filter((action) => action.status === "pending").length}</span>
+        <span className="badge badge-cyan" style={{ marginLeft: "auto" }}>{pendingActions.length}</span>
       </div>
 
       <p className="mb-3 text-[0.83rem] leading-relaxed text-[var(--text-secondary)]">
@@ -34,13 +35,13 @@ export default function AutonomyQueue() {
       </p>
 
       <div className="flex max-h-[460px] flex-col gap-2 overflow-y-auto pr-1">
-        {actions.length === 0 && (
+        {pendingActions.length === 0 && (
           <div className="rounded-md border border-dashed border-[var(--border)] bg-[var(--bg-card)] px-3 py-6 text-center text-[0.85rem] text-[var(--text-muted)]">
             No autonomy proposals yet. Telemetry rules will surface here as the car warms up.
           </div>
         )}
 
-        {actions.map((action) => (
+        {pendingActions.map((action) => (
           <div key={action.id} className="rounded-[12px] border border-[var(--border)] bg-[var(--bg-card)] p-3">
             <div className="mb-2 flex items-start gap-2">
               <span className="led" style={{ background: severityColor[action.severity], boxShadow: `0 0 6px ${severityColor[action.severity]}` }} />

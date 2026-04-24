@@ -34,27 +34,27 @@ interface SessionBlock {
   points: InfluxTelemetryPoint[];
 }
 
-interface ForecastPoint {
+interface RpmForecastPoint {
   ts: number;
   label: string;
   rpm: number | null;
   rpm_base: number | null;
   rpm_low: number | null;
   rpm_high: number | null;
-  temp: number | null;
-  temp_pred: number | null;
-  pressure: number | null;
-  pressure_pred: number | null;
-  throttle: number | null;
-  brake: number | null;
-  g_lat: number | null;
-  g_lon: number | null;
-  g_vert: number | null;
 }
 
-interface LinearSeries {
-  actual: number | null;
-  predicted: number | null;
+interface TempForecastPoint {
+  ts: number;
+  label: string;
+  temp: number | null;
+  temp_pred: number | null;
+}
+
+interface PressureForecastPoint {
+  ts: number;
+  label: string;
+  pressure: number | null;
+  pressure_pred: number | null;
 }
 
 interface SessionSummary {
@@ -159,94 +159,125 @@ function buildSessions(points: InfluxTelemetryPoint[]): SessionBlock[] {
   return sessions.reverse();
 }
 
-function buildForecastSeries(points: InfluxTelemetryPoint[], futureSteps = 36): ForecastPoint[] {
+function holtForecast(values: number[], alpha: number, beta: number, steps: number): number[] {
+  if (values.length < 2) return Array(steps).fill(values[values.length - 1] ?? 0);
+  let level = values[0];
+  let trend = values[1] - values[0];
+  for (let i = 1; i < values.length; i++) {
+    const prevLevel = level;
+    level = alpha * values[i] + (1 - alpha) * (level + trend);
+    trend = beta * (level - prevLevel) + (1 - beta) * trend;
+  }
+  return Array.from({ length: steps }, (_, i) => Math.max(0, level + (i + 1) * trend));
+}
+
+function getTimeStep(sorted: InfluxTelemetryPoint[]): number {
+  const recent = sorted.slice(-120);
+  return (
+    median(
+      recent
+        .map((p, i) => (i === 0 ? 0 : p.ts - recent[i - 1].ts))
+        .filter((s) => s > 0)
+    ) || 1000
+  );
+}
+
+function buildRpmForecast(points: InfluxTelemetryPoint[], futureSteps = 36): RpmForecastPoint[] {
   const sorted = [...points].sort((a, b) => a.ts - b.ts);
   if (sorted.length === 0) return [];
 
-  const history = sorted.map((point) => ({
-    ts: point.ts,
-    label: new Date(point.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-    rpm: point.rpm,
+  const history: RpmForecastPoint[] = sorted.map((p) => ({
+    ts: p.ts,
+    label: new Date(p.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    rpm: p.rpm,
     rpm_base: null,
     rpm_low: null,
     rpm_high: null,
-    temp: point.air_temp,
-    temp_pred: null,
-    pressure: point.pressure,
-    pressure_pred: null,
-    throttle: point.throttle,
-    brake: point.brake,
-    g_lat: point.g_lat,
-    g_lon: point.g_lon,
-    g_vert: point.g_vert,
   }));
 
-  if (sorted.length < 6) {
-    return history;
-  }
+  if (sorted.length < 6) return history;
 
   const recent = sorted.slice(-120);
-  const timeStep = median(
-    recent
-      .map((point, index) => (index === 0 ? 0 : point.ts - recent[index - 1].ts))
-      .filter((step) => step > 0)
-  ) || 1000;
-
+  const timeStep = getTimeStep(sorted);
   const lastTs = sorted[sorted.length - 1].ts;
-  const seriesMap = {
-    rpm: recent.map((point) => point.rpm ?? 0),
-    temp: recent.map((point) => point.air_temp ?? 0),
-    pressure: recent.map((point) => point.pressure ?? 0),
-  };
+  const rpmValues = recent.map((p) => p.rpm ?? 0);
+  const rpmStd = stdDev(rpmValues);
+  const predicted = holtForecast(rpmValues, 0.3, 0.05, futureSteps);
 
-  const fit = (values: number[]): LinearSeries => {
-    const n = values.length;
-    const xMean = (n - 1) / 2;
-    const yMean = mean(values);
-    let numerator = 0;
-    let denominator = 0;
-    values.forEach((value, index) => {
-      const dx = index - xMean;
-      numerator += dx * (value - yMean);
-      denominator += dx * dx;
-    });
-    const slope = denominator === 0 ? 0 : numerator / denominator;
-    const intercept = yMean - slope * xMean;
-    return {
-      actual: values[values.length - 1] ?? 0,
-      predicted: intercept + slope * values.length,
-    };
-  };
-
-  const rpmFit = fit(seriesMap.rpm);
-  const tempFit = fit(seriesMap.temp);
-  const pressureFit = fit(seriesMap.pressure);
-
-  const forecast = Array.from({ length: futureSteps }, (_, index) => {
-    const x = seriesMap.rpm.length + index;
-    const rpmBase = (rpmFit.predicted ?? 0) + (x - seriesMap.rpm.length) * ((rpmFit.predicted ?? 0) - (rpmFit.actual ?? 0)) * 0.02;
-    const tempPred = (tempFit.predicted ?? 0) + Math.sin(index / 8) * 0.15;
-    const pressurePred = (pressureFit.predicted ?? 0) + Math.cos(index / 10) * 0.02;
-    const rpmLow = rpmBase * 0.9;
-    const rpmHigh = rpmBase * 1.08;
-    const ts = lastTs + (index + 1) * timeStep;
-
+  const forecast: RpmForecastPoint[] = predicted.map((base, i) => {
+    const spread = rpmStd * (i + 1) * 0.15;
+    const ts = lastTs + (i + 1) * timeStep;
     return {
       ts,
       label: new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
       rpm: null,
-      rpm_base: Math.max(0, Math.round(rpmBase)),
-      rpm_low: Math.max(0, Math.round(rpmLow)),
-      rpm_high: Math.max(0, Math.round(rpmHigh)),
+      rpm_base: Math.round(base),
+      rpm_low: Math.max(0, Math.round(base - spread)),
+      rpm_high: Math.round(base + spread),
+    };
+  });
+
+  return [...history, ...forecast];
+}
+
+function buildTempForecast(points: InfluxTelemetryPoint[], futureSteps = 36): TempForecastPoint[] {
+  const sorted = [...points].sort((a, b) => a.ts - b.ts);
+  if (sorted.length === 0) return [];
+
+  const history: TempForecastPoint[] = sorted.map((p) => ({
+    ts: p.ts,
+    label: new Date(p.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    temp: p.air_temp,
+    temp_pred: null,
+  }));
+
+  if (sorted.length < 6) return history;
+
+  const recent = sorted.slice(-120);
+  const timeStep = getTimeStep(sorted);
+  const lastTs = sorted[sorted.length - 1].ts;
+  const tempValues = recent.map((p) => p.air_temp ?? 0);
+  const predicted = holtForecast(tempValues, 0.2, 0.03, futureSteps);
+
+  const forecast: TempForecastPoint[] = predicted.map((val, i) => {
+    const ts = lastTs + (i + 1) * timeStep;
+    return {
+      ts,
+      label: new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
       temp: null,
-      temp_pred: +tempPred.toFixed(2),
+      temp_pred: +val.toFixed(2),
+    };
+  });
+
+  return [...history, ...forecast];
+}
+
+function buildPressureForecast(points: InfluxTelemetryPoint[], futureSteps = 36): PressureForecastPoint[] {
+  const sorted = [...points].sort((a, b) => a.ts - b.ts);
+  if (sorted.length === 0) return [];
+
+  const history: PressureForecastPoint[] = sorted.map((p) => ({
+    ts: p.ts,
+    label: new Date(p.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    pressure: p.pressure,
+    pressure_pred: null,
+  }));
+
+  if (sorted.length < 6) return history;
+
+  const recent = sorted.slice(-120);
+  const timeStep = getTimeStep(sorted);
+  const lastTs = sorted[sorted.length - 1].ts;
+  const pressureValues = recent.map((p) => p.pressure ?? 0);
+  const predicted = holtForecast(pressureValues, 0.15, 0.02, futureSteps);
+
+  const forecast: PressureForecastPoint[] = predicted.map((val, i) => {
+    const ts = lastTs + (i + 1) * timeStep;
+    return {
+      ts,
+      label: new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
       pressure: null,
-      pressure_pred: +pressurePred.toFixed(2),
-      throttle: null,
-      brake: null,
-      g_lat: null,
-      g_lon: null,
-      g_vert: null,
+      pressure_pred: +val.toFixed(2),
     };
   });
 
@@ -379,8 +410,16 @@ export default function Sessions() {
     }
   }, [selectedSession, selectedSessionId]);
 
-  const forecastSeries = useMemo(
-    () => (selectedSession ? buildForecastSeries(selectedSession.points) : []),
+  const rpmForecast = useMemo(
+    () => (selectedSession ? buildRpmForecast(selectedSession.points) : []),
+    [selectedSession]
+  );
+  const tempForecast = useMemo(
+    () => (selectedSession ? buildTempForecast(selectedSession.points) : []),
+    [selectedSession]
+  );
+  const pressureForecast = useMemo(
+    () => (selectedSession ? buildPressureForecast(selectedSession.points) : []),
     [selectedSession]
   );
 
@@ -403,7 +442,7 @@ export default function Sessions() {
   const isEmpty = sessions.length === 0;
 
   return (
-    <div className="page-content flex h-full flex-col gap-3.5 overflow-hidden">
+    <div className="page-content flex h-full flex-col gap-3.5 ">
       <div className="grid gap-3.5 xl:grid-cols-[240px_minmax(0,1fr)]">
         <div className="card flex min-h-0 flex-col overflow-hidden">
           <div className="card-header-row">
@@ -483,55 +522,93 @@ export default function Sessions() {
             />
           </div>
 
-          <div className="grid gap-3.5 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="grid gap-3.5 xl:grid-cols-3">
             <div className="card">
               <div className="card-header-row">
-                <TrendingUp size={15} style={{ color: "var(--accent-amber)" }} />
-                <h3>Session Forecast: RPM, Temperature, Pressure</h3>
+                <TrendingUp size={15} style={{ color: "var(--accent-cyan)" }} />
+                <h3>RPM Forecast</h3>
               </div>
               {selectedSession ? (
-                <ResponsiveContainer width="100%" height={260}>
-                  <ComposedChart data={forecastSeries} margin={{ top: 6, right: 10, left: -18, bottom: 0 }}>
+                <ResponsiveContainer width="100%" height={220}>
+                  <ComposedChart data={rpmForecast} margin={{ top: 6, right: 10, left: -18, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#242428" />
                     <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} minTickGap={22} />
-                    <YAxis yAxisId="rpm" tick={{ fill: "var(--text-muted)", fontSize: 10 }} unit=" rpm" />
-                    <YAxis yAxisId="env" orientation="right" tick={{ fill: "var(--text-muted)", fontSize: 10 }} />
+                    <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} unit=" rpm" />
                     <Tooltip contentStyle={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8 }} />
                     <Legend wrapperStyle={{ fontSize: "0.75rem" }} />
-                    <Line yAxisId="rpm" type="monotone" dataKey="rpm" stroke="var(--accent-cyan)" dot={false} strokeWidth={2} name="RPM History" connectNulls />
-                    <Line yAxisId="rpm" type="monotone" dataKey="rpm_base" stroke="var(--accent-amber)" dot={false} strokeWidth={2} strokeDasharray="6 4" name="RPM Forecast" connectNulls />
-                    <Line yAxisId="rpm" type="monotone" dataKey="rpm_low" stroke="var(--accent-green)" dot={false} strokeWidth={1.6} strokeDasharray="3 4" name="RPM Low" connectNulls />
-                    <Line yAxisId="rpm" type="monotone" dataKey="rpm_high" stroke="var(--accent-red)" dot={false} strokeWidth={1.6} strokeDasharray="3 4" name="RPM High" connectNulls />
-                    <Line yAxisId="env" type="monotone" dataKey="temp" stroke="var(--accent-purple)" dot={false} strokeWidth={1.8} name="Temp History" connectNulls />
-                    <Line yAxisId="env" type="monotone" dataKey="temp_pred" stroke="var(--accent-purple)" dot={false} strokeWidth={1.8} strokeDasharray="4 4" name="Temp Forecast" connectNulls />
-                    <Line yAxisId="env" type="monotone" dataKey="pressure" stroke="var(--text-secondary)" dot={false} strokeWidth={1.6} name="Pressure History" connectNulls />
-                    <Line yAxisId="env" type="monotone" dataKey="pressure_pred" stroke="var(--text-secondary)" dot={false} strokeWidth={1.6} strokeDasharray="4 4" name="Pressure Forecast" connectNulls />
+                    <Area type="monotone" dataKey="rpm_high" stroke="none" fill="var(--accent-amber)" fillOpacity={0.12} name="Confidence Band" legendType="none" connectNulls />
+                    <Area type="monotone" dataKey="rpm_low" stroke="none" fill="var(--bg-card)" fillOpacity={1} name="Band Floor" legendType="none" connectNulls />
+                    <Line type="monotone" dataKey="rpm" stroke="var(--accent-cyan)" dot={false} strokeWidth={2} name="RPM History" connectNulls />
+                    <Line type="monotone" dataKey="rpm_base" stroke="var(--accent-amber)" dot={false} strokeWidth={2} strokeDasharray="6 4" name="RPM Forecast" connectNulls />
                   </ComposedChart>
                 </ResponsiveContainer>
               ) : (
-                <p className="text-[0.85rem] text-[var(--text-secondary)]">Select a session to view its forecast model.</p>
+                <p className="text-[0.85rem] text-[var(--text-secondary)]">Select a session to view the RPM forecast.</p>
               )}
             </div>
 
             <div className="card">
               <div className="card-header-row">
-                <RadarIcon size={15} style={{ color: "var(--accent-cyan)" }} />
-                <h3>Session Profile Radar</h3>
+                <TrendingUp size={15} style={{ color: "var(--accent-purple)" }} />
+                <h3>Temperature Forecast</h3>
               </div>
-              {radarData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={260}>
-                  <RadarChart data={radarData} outerRadius="72%">
-                    <PolarGrid stroke="#242428" />
-                    <PolarAngleAxis dataKey="metric" tick={{ fill: "var(--text-muted)", fontSize: 10 }} />
-                    <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: "var(--text-muted)", fontSize: 9 }} />
-                    <Radar dataKey="value" stroke="var(--accent-cyan)" fill="var(--accent-cyan)" fillOpacity={0.2} dot />
-                    <Legend />
-                  </RadarChart>
+              {selectedSession ? (
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={tempForecast} margin={{ top: 6, right: 10, left: -18, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#242428" />
+                    <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} minTickGap={22} />
+                    <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} unit=" °C" />
+                    <Tooltip contentStyle={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8 }} />
+                    <Legend wrapperStyle={{ fontSize: "0.75rem" }} />
+                    <Line type="monotone" dataKey="temp" stroke="var(--accent-purple)" dot={false} strokeWidth={2} name="Temp History" connectNulls />
+                    <Line type="monotone" dataKey="temp_pred" stroke="var(--accent-amber)" dot={false} strokeWidth={2} strokeDasharray="6 4" name="Temp Forecast" connectNulls />
+                  </LineChart>
                 </ResponsiveContainer>
               ) : (
-                <p className="text-[0.85rem] text-[var(--text-secondary)]">No session selected yet.</p>
+                <p className="text-[0.85rem] text-[var(--text-secondary)]">Select a session to view the temperature forecast.</p>
               )}
             </div>
+
+            <div className="card">
+              <div className="card-header-row">
+                <Waves size={15} style={{ color: "var(--accent-green)" }} />
+                <h3>Pressure Forecast</h3>
+              </div>
+              {selectedSession ? (
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={pressureForecast} margin={{ top: 6, right: 10, left: -18, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#242428" />
+                    <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} minTickGap={22} />
+                    <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} unit=" hPa" />
+                    <Tooltip contentStyle={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8 }} />
+                    <Legend wrapperStyle={{ fontSize: "0.75rem" }} />
+                    <Line type="monotone" dataKey="pressure" stroke="var(--text-secondary)" dot={false} strokeWidth={2} name="Pressure History" connectNulls />
+                    <Line type="monotone" dataKey="pressure_pred" stroke="var(--accent-green)" dot={false} strokeWidth={2} strokeDasharray="6 4" name="Pressure Forecast" connectNulls />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-[0.85rem] text-[var(--text-secondary)]">Select a session to view the pressure forecast.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-header-row">
+              <RadarIcon size={15} style={{ color: "var(--accent-cyan)" }} />
+              <h3>Session Profile Radar</h3>
+            </div>
+            {radarData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={260}>
+                <RadarChart data={radarData} outerRadius="72%">
+                  <PolarGrid stroke="#4e4e7c" />
+                  <PolarAngleAxis dataKey="metric" tick={{ fill: "var(--text-muted)", fontSize: 15 }} />
+                  <Radar dataKey="value" stroke="var(--accent-cyan)" fill="var(--accent-cyan)" fillOpacity={0.2} dot />
+                  <Legend/>
+                </RadarChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-[0.85rem] text-[var(--text-secondary)]">No session selected yet.</p>
+            )}
           </div>
 
           <div className="grid gap-3.5 xl:grid-cols-[1.08fr_0.92fr]">

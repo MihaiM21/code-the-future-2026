@@ -52,7 +52,31 @@ export interface AutonomyAction {
   status: AutonomyActionStatus;
 }
 
-export type Page = "dashboard" | "safety" | "can" | "laps" | "settings";
+export interface PersistedAutonomyCommand {
+  id: string;
+  rule_id: string;
+  ts: number;
+  level: number;
+  domain: string;
+  severity: AlertEntry["severity"];
+  title: string;
+  rationale: string;
+  trigger: string;
+  suggested_commands: string[];
+  command: string;
+  requires_approval: boolean;
+  status: AutonomyActionStatus;
+  created_by_user_id: number | null;
+}
+
+export interface AutonomyCatalogCommand {
+  id: number;
+  command: string;
+  source: string;
+  created_by_user_id: number | null;
+}
+
+export type Page = "dashboard" | "safety" | "can" | "laps" | "autonomy" | "settings";
 
 export interface SerialConfig {
   port: string;

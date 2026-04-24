@@ -2,6 +2,13 @@ import type { TelemetryFrame, AutonomyAction } from "../types";
 import { useAlertStore, useAutonomyStore, useConfigStore } from "../store";
 import { useAuthStore } from "../store/auth";
 import { sendSerialCommand } from "./command";
+import { saveAutonomyActionToDb } from "./autonomyDb";
+import {
+  BATTERY_PROTECTION_COMMANDS,
+  COOLING_RESPONSE_COMMANDS,
+  EXHAUST_CLEANOUT_COMMANDS,
+  RPM_ADVISORY_COMMANDS,
+} from "./autonomyCatalog";
 
 type CandidateRule = {
   action: AutonomyAction;
@@ -44,9 +51,31 @@ function clearRule(ruleId: string): void {
 function recordCandidate(candidate: CandidateRule): void {
   const autonomyStore = useAutonomyStore.getState();
   autonomyStore.addAction(candidate.action);
+  void persistAction(candidate.action);
 
   if (candidate.autoSend) {
     void dispatchAutonomyAction(candidate.action.id, true);
+  }
+}
+
+async function persistAction(action: AutonomyAction): Promise<void> {
+  try {
+    await saveAutonomyActionToDb(action);
+  } catch (error) {
+    useAlertStore.getState().addAlert({
+      id: makeId("autonomy-db-save-failed"),
+      ts: Date.now(),
+      severity: "warning",
+      system: "Autonomy",
+      message: `Failed to persist autonomy command: ${String(error)}`,
+    });
+  }
+}
+
+function queuePersist(actionId: string): void {
+  const action = useAutonomyStore.getState().actions.find((item) => item.id === actionId);
+  if (action) {
+    void persistAction(action);
   }
 }
 
@@ -77,10 +106,12 @@ async function dispatchAutonomyAction(actionId: string, autoApproved = false): P
     command,
     status: autoApproved ? "approved" : "approved",
   });
+  queuePersist(actionId);
 
   try {
     await sendSerialCommand(command);
     autonomyStore.updateAction(actionId, { status: "sent", command });
+    queuePersist(actionId);
     useAlertStore.getState().addAlert({
       id: makeId("autonomy-sent"),
       ts: Date.now(),
@@ -90,6 +121,7 @@ async function dispatchAutonomyAction(actionId: string, autoApproved = false): P
     });
   } catch (error) {
     autonomyStore.updateAction(actionId, { status: "blocked" });
+    queuePersist(actionId);
     useAlertStore.getState().addAlert({
       id: makeId("autonomy-send-failed"),
       ts: Date.now(),
@@ -113,7 +145,7 @@ export function evaluateAutonomyFrame(frame: TelemetryFrame): void {
 
     if (active) {
       if (canRearm(ruleId)) {
-        const commands = ["AUTONOMY:FAN_ON", "AUTONOMY:AERO_OPEN", "AUTONOMY:THROTTLE_SCALE:0.90"];
+        const commands = [...COOLING_RESPONSE_COMMANDS];
         candidates.push({
           action: buildAction({
             ruleId,
@@ -143,7 +175,7 @@ export function evaluateAutonomyFrame(frame: TelemetryFrame): void {
 
     if (active) {
       if (canRearm(ruleId)) {
-        const commands = ["AUTONOMY:THROTTLE_BOOST:1.10", "AUTONOMY:ENGINE_CLEAN_BURN", "AUTONOMY:THROTTLE_SCALE:1.05"];
+        const commands = [...EXHAUST_CLEANOUT_COMMANDS];
         candidates.push({
           action: buildAction({
             ruleId,
@@ -173,7 +205,7 @@ export function evaluateAutonomyFrame(frame: TelemetryFrame): void {
 
     if (active) {
       if (canRearm(ruleId)) {
-        const commands = ["AUTONOMY:LOAD_SHED", "AUTONOMY:SHUTDOWN_NONCRITICAL", "AUTONOMY:REDUCE_AERO_LOAD"];
+        const commands = [...BATTERY_PROTECTION_COMMANDS];
         candidates.push({
           action: buildAction({
             ruleId,
@@ -197,10 +229,10 @@ export function evaluateAutonomyFrame(frame: TelemetryFrame): void {
     }
   }
 
-  if (typeof frame.rpm === "number" && frame.rpm >= config.rpmLimit) {
+  if (config.autoRpmAdvisoryEnabled && typeof frame.rpm === "number" && frame.rpm >= config.rpmLimit) {
     const ruleId = "rpm-advisory";
     if (canRearm(ruleId)) {
-      const commands = ["AUTONOMY:SHIFT_UP", "AUTONOMY:THROTTLE_LIMIT:0.95", "AUTONOMY:ENGINE_SAFETY_HOLD"];
+      const commands = [...RPM_ADVISORY_COMMANDS];
       candidates.push({
         action: buildAction({
           ruleId,
@@ -232,6 +264,7 @@ export async function approveAutonomyAction(actionId: string): Promise<void> {
 
 export function rejectAutonomyAction(actionId: string): void {
   useAutonomyStore.getState().updateAction(actionId, { status: "rejected" });
+  queuePersist(actionId);
   useAlertStore.getState().addAlert({
     id: makeId("autonomy-rejected"),
     ts: Date.now(),
@@ -243,4 +276,5 @@ export function rejectAutonomyAction(actionId: string): void {
 
 export function updateAutonomyActionCommand(actionId: string, command: string): void {
   useAutonomyStore.getState().updateAction(actionId, { command });
+  queuePersist(actionId);
 }
