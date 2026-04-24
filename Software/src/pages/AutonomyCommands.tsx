@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Database, Lock, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Database, Lock, Plus, RefreshCw, Send, Trash2 } from "lucide-react";
 import type { AutonomyCatalogCommand, PersistedAutonomyCommand } from "../types";
 import { useAuthStore } from "../store/auth";
-import { useAutonomyStore } from "../store";
+import { useAlertStore, useAutonomyStore } from "../store";
 import {
   deleteAutonomyCatalogCommand,
   deletePersistedAutonomyCommand,
@@ -10,6 +10,7 @@ import {
   listPersistedAutonomyCommands,
   upsertAutonomyCatalogCommands,
 } from "../services/autonomyDb";
+import { sendCommand } from "../services/serial";
 import { AUTONOMY_DEFAULT_COMMANDS } from "../services/autonomyCatalog";
 
 const severityColor: Record<PersistedAutonomyCommand["severity"], string> = {
@@ -25,6 +26,7 @@ export default function AutonomyCommands() {
   const [catalogCommands, setCatalogCommands] = useState<AutonomyCatalogCommand[]>([]);
   const [newCommand, setNewCommand] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sendingCommand, setSendingCommand] = useState("");
   const [error, setError] = useState("");
 
   const statusCounts = useMemo(() => {
@@ -34,14 +36,19 @@ export default function AutonomyCommands() {
     }, {});
   }, [persistedActions]);
 
-  const loadActions = async () => {
+  const refreshData = async () => {
     if (!isAuthorized) return;
 
     setLoading(true);
     setError("");
     try {
-      const items = await listPersistedAutonomyCommands();
-      setPersistedActions(items);
+      await upsertAutonomyCatalogCommands(AUTONOMY_DEFAULT_COMMANDS, "default");
+      const [actions, commands] = await Promise.all([
+        listPersistedAutonomyCommands(),
+        listAutonomyCatalogCommands(),
+      ]);
+      setPersistedActions(actions);
+      setCatalogCommands(commands);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -49,23 +56,42 @@ export default function AutonomyCommands() {
     }
   };
 
-  const loadCatalog = async () => {
-    if (!isAuthorized) return;
+  useEffect(() => {
+    void refreshData();
+  }, [isAuthorized]);
 
+  const handleSendCommand = async (command: string) => {
+    const normalized = command.trim();
+    if (!normalized) {
+      setError("Please enter a command before sending.");
+      return;
+    }
+
+    setSendingCommand(normalized);
     setError("");
+
     try {
-      await upsertAutonomyCatalogCommands(AUTONOMY_DEFAULT_COMMANDS, "default");
-      const items = await listAutonomyCatalogCommands();
-      setCatalogCommands(items);
+      await sendCommand(normalized);
+      useAlertStore.getState().addAlert({
+        id: `autonomy-manual-send-${Date.now()}`,
+        ts: Date.now(),
+        severity: "info",
+        system: "Autonomy",
+        message: `Sent command to ESP: ${normalized}`,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      useAlertStore.getState().addAlert({
+        id: `autonomy-manual-send-failed-${Date.now()}`,
+        ts: Date.now(),
+        severity: "critical",
+        system: "Autonomy",
+        message: `Failed to send command to ESP: ${String(e)}`,
+      });
+    } finally {
+      setSendingCommand("");
     }
   };
-
-  useEffect(() => {
-    void loadActions();
-    void loadCatalog();
-  }, [isAuthorized]);
 
   const handleDelete = async (id: string) => {
     if (!isAuthorized) return;
@@ -96,7 +122,7 @@ export default function AutonomyCommands() {
     try {
       await upsertAutonomyCatalogCommands([normalized], "manual");
       setNewCommand("");
-      await loadCatalog();
+      await refreshData();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -133,13 +159,40 @@ export default function AutonomyCommands() {
   return (
     <div className="page-content h-full">
       <div className="card h-190 mb-3.5">
-        <div className="card-header-row">
-          <Database size={16} style={{ color: "var(--accent-green)" }} />
-          <h3>Command Library</h3>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="card-header-row">
+              <Database size={16} style={{ color: "var(--accent-green)" }} />
+              <h3>Command Library</h3>
+            </div>
+            <p className="mb-3 text-[0.82rem] text-[var(--text-secondary)]">
+              Default commands from autonomy rules are seeded here. Add custom commands for operators to reuse, then send any entry directly to the ESP.
+            </p>
+          </div>
+          <button className="btn btn-ghost shrink-0" onClick={() => void refreshData()} disabled={loading}>
+            <RefreshCw size={14} className={loading ? "spin" : ""} />
+            Refresh
+          </button>
         </div>
-        <p className="mb-3 text-[0.82rem] text-[var(--text-secondary)]">
-          Default commands from autonomy rules are seeded here. Add custom commands for operators to reuse.
-        </p>
+
+        <div className="mb-3 flex flex-wrap gap-2">
+          {Object.keys(statusCounts).length === 0 ? (
+            <span className="badge uppercase" style={{ background: "rgba(255,255,255,0.05)", color: "var(--text-muted)" }}>
+              No persisted autonomy actions yet
+            </span>
+          ) : (
+            Object.entries(statusCounts).map(([status, count]) => (
+              <span
+                key={status}
+                className="badge uppercase"
+                style={{ background: "rgba(255,255,255,0.05)", color: "var(--text-muted)" }}
+              >
+                {status}: {count}
+              </span>
+            ))
+          )}
+        </div>
+
         <div className="flex flex-col gap-2 md:flex-row">
           <input
             type="text"
@@ -150,6 +203,14 @@ export default function AutonomyCommands() {
           />
           <button className="btn btn-primary" onClick={() => void handleAddCatalogCommand()}>
             <Plus size={14} /> Add Command
+          </button>
+          <button
+            className="btn btn-ghost"
+            onClick={() => void handleSendCommand(newCommand)}
+            disabled={sendingCommand === newCommand.trim() || !newCommand.trim()}
+          >
+            <Send size={14} />
+            {sendingCommand === newCommand.trim() ? "Sending..." : "Send Now"}
           </button>
         </div>
 
@@ -166,6 +227,14 @@ export default function AutonomyCommands() {
               <span className="badge uppercase" style={{ background: "rgba(255,255,255,0.05)", color: "var(--text-muted)" }}>
                 {item.source}
               </span>
+              <button
+                className="btn btn-ghost"
+                onClick={() => void handleSendCommand(item.command)}
+                disabled={sendingCommand === item.command}
+              >
+                <Send size={13} />
+                {sendingCommand === item.command ? "Sending..." : "Send"}
+              </button>
               <button className="btn btn-danger" onClick={() => void handleDeleteCatalogCommand(item.id)}>
                 <Trash2 size={13} /> Delete
               </button>
