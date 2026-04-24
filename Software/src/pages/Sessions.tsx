@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchRecentTelemetry } from "../services/influx";
-import type { InfluxTelemetryPoint } from "../types";
+import { useTelemetryStore } from "../store";
+import type { InfluxTelemetryPoint, TelemetryFrame } from "../types";
 import {
   Area,
   AreaChart,
@@ -124,6 +125,56 @@ function median(values: number[]): number {
 function normalize(value: number, min: number, max: number): number {
   if (max <= min) return 0;
   return clamp(((value - min) / (max - min)) * 100, 0, 100);
+}
+
+function hasSignal(point: InfluxTelemetryPoint): boolean {
+  return (
+    point.air_temp != null ||
+    point.air_quality != null ||
+    point.pressure != null ||
+    point.g_lat != null ||
+    point.g_lon != null ||
+    point.g_vert != null ||
+    point.throttle != null ||
+    point.brake != null ||
+    point.rpm != null
+  );
+}
+
+function fromLiveFrame(frame: TelemetryFrame): InfluxTelemetryPoint {
+  return {
+    ts: frame.ts,
+    air_temp: frame.air_temp,
+    air_quality: frame.air_quality,
+    pressure: frame.pressure,
+    g_lat: frame.g_lat,
+    g_lon: frame.g_lon,
+    g_vert: frame.g_vert,
+    throttle: frame.throttle,
+    brake: frame.brake,
+    rpm: frame.rpm,
+  };
+}
+
+function buildSimulatedTelemetry(samples = 360, stepMs = 1000): InfluxTelemetryPoint[] {
+  const now = Date.now();
+  return Array.from({ length: samples }, (_, i) => {
+    const t = i / 9;
+    const ts = now - (samples - i) * stepMs;
+
+    return {
+      ts,
+      air_temp: +(26 + Math.sin(t * 0.27) * 4 + Math.sin(t * 0.06)).toFixed(2),
+      air_quality: +(54 + Math.sin(t * 0.15) * 14).toFixed(2),
+      pressure: +(1012 + Math.sin(t * 0.08) * 1.8).toFixed(2),
+      g_lat: +(Math.sin(t * 0.5) * 1.8).toFixed(3),
+      g_lon: +(Math.cos(t * 0.41) * 1.4).toFixed(3),
+      g_vert: +(1 + Math.sin(t * 0.7) * 0.22).toFixed(3),
+      throttle: Math.round(clamp(45 + Math.sin(t * 0.4) * 40, 0, 100)),
+      brake: Math.round(clamp(18 + Math.sin(t * 0.23 + Math.PI) * 20, 0, 100)),
+      rpm: Math.round(clamp(4200 + Math.sin(t * 0.38) * 2300 + Math.cos(t * 0.07) * 450, 1100, 9800)),
+    };
+  });
 }
 
 function buildSessions(points: InfluxTelemetryPoint[]): SessionBlock[] {
@@ -356,10 +407,16 @@ function MetricCard({
 }
 
 export default function Sessions() {
+  const liveHistory = useTelemetryStore((state) => state.history);
+  const liveHistoryRef = useRef<TelemetryFrame[]>([]);
   const [points, setPoints] = useState<InfluxTelemetryPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
+
+  useEffect(() => {
+    liveHistoryRef.current = liveHistory;
+  }, [liveHistory]);
 
   useEffect(() => {
     let mounted = true;
@@ -369,12 +426,31 @@ export default function Sessions() {
       setError(null);
       try {
         const telemetry = await fetchRecentTelemetry(HISTORY_WINDOW_SECONDS, 1000, HISTORY_LIMIT);
+        const dbPoints = telemetry.filter(hasSignal);
+
+        let resolved = dbPoints;
+        if (resolved.length === 0) {
+          resolved = liveHistoryRef.current.map(fromLiveFrame).filter(hasSignal);
+        }
+        if (resolved.length === 0) {
+          resolved = buildSimulatedTelemetry();
+        }
+
         if (mounted) {
-          setPoints(telemetry);
+          setPoints(resolved);
+          if (dbPoints.length === 0) {
+            setError("No Influx telemetry found. Showing fallback data so graphs stay active.");
+          }
         }
       } catch (err) {
+        let fallback = liveHistoryRef.current.map(fromLiveFrame).filter(hasSignal);
+        if (fallback.length === 0) {
+          fallback = buildSimulatedTelemetry();
+        }
+
         if (mounted) {
-          setError(String(err));
+          setPoints(fallback);
+          setError(`Influx query failed (${String(err)}). Using fallback telemetry for charts.`);
         }
       } finally {
         if (mounted) {

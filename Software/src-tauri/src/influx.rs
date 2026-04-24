@@ -235,26 +235,41 @@ fn write_point(client: &Client, cfg: &InfluxConfig, frame: &Value) -> Result<i64
 fn to_line_protocol(cfg: &InfluxConfig, frame: &Value) -> Option<String> {
     let source_ts = frame.get("ts").and_then(|v| v.as_i64());
     let ts = normalize_timestamp_ms(source_ts);
+    const STANDARD_GRAVITY: f64 = 9.80665;
+
+    let air_temp = pick_numeric(frame, "air_temp")
+        .or_else(|| pick_nested_numeric(frame, "dht22", "temperature_c"));
+    let air_quality = pick_numeric(frame, "air_quality");
+    let pressure = pick_numeric(frame, "pressure")
+        .or_else(|| pick_nested_numeric(frame, "bmp280", "pressure_hpa"));
+    let g_lat = pick_numeric(frame, "g_lat")
+        .or_else(|| pick_nested_array_numeric(frame, "mpu6050", "accelerometer_m_s2", 0).map(|v| v / STANDARD_GRAVITY));
+    let g_lon = pick_numeric(frame, "g_lon")
+        .or_else(|| pick_nested_array_numeric(frame, "mpu6050", "accelerometer_m_s2", 1).map(|v| v / STANDARD_GRAVITY));
+    let g_vert = pick_numeric(frame, "g_vert")
+        .or_else(|| pick_nested_array_numeric(frame, "mpu6050", "accelerometer_m_s2", 2).map(|v| v / STANDARD_GRAVITY));
+    let throttle = pick_numeric(frame, "throttle");
+    let brake = pick_numeric(frame, "brake");
+    let rpm = pick_numeric(frame, "rpm");
 
     let mut fields: Vec<String> = Vec::new();
     if let Some(raw_ts) = source_ts {
         fields.push(format!("source_ts={raw_ts}i"));
     }
-    for key in [
-        "air_temp",
-        "air_quality",
-        "pressure",
-        "g_lat",
-        "g_lon",
-        "g_vert",
-        "throttle",
-        "brake",
-        "rpm",
+
+    for (key, value) in [
+        ("air_temp", air_temp),
+        ("air_quality", air_quality),
+        ("pressure", pressure),
+        ("g_lat", g_lat),
+        ("g_lon", g_lon),
+        ("g_vert", g_vert),
+        ("throttle", throttle),
+        ("brake", brake),
+        ("rpm", rpm),
     ] {
-        if let Some(v) = frame.get(key).and_then(|x| x.as_f64()) {
-            if v.is_finite() {
-                fields.push(format!("{key}={v}"));
-            }
+        if let Some(v) = value.filter(|v| v.is_finite()) {
+            fields.push(format!("{key}={v}"));
         }
     }
 
@@ -263,6 +278,18 @@ fn to_line_protocol(cfg: &InfluxConfig, frame: &Value) -> Option<String> {
     }
 
     Some(format!("{} {} {}", cfg.measurement, fields.join(","), ts))
+}
+
+fn pick_numeric(frame: &Value, key: &str) -> Option<f64> {
+    frame.get(key).and_then(|v| v.as_f64())
+}
+
+fn pick_nested_numeric(frame: &Value, parent: &str, key: &str) -> Option<f64> {
+    frame.get(parent)?.get(key)?.as_f64()
+}
+
+fn pick_nested_array_numeric(frame: &Value, parent: &str, key: &str, index: usize) -> Option<f64> {
+    frame.get(parent)?.get(key)?.as_array()?.get(index)?.as_f64()
 }
 
 fn normalize_timestamp_ms(source_ts: Option<i64>) -> i64 {
