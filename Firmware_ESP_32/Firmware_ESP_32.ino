@@ -2,47 +2,59 @@
 #include <WebSocketsClient.h>
 #include "config.h"
 
-WebSocketsClient webSocket;
+WebSocketsClient wsTelemetry; // Pentru recepție (8765)
+WebSocketsClient wsCommands;  // Pentru trimitere (8766)
 
-void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
+void onTelemetryEvent(WStype_t type, uint8_t * payload, size_t length) {
+  if (type == WStype_TEXT) {
+    Serial.println((char*)payload); 
+  }
+}
+
+void onCommandEvent(WStype_t type, uint8_t * payload, size_t length) {
   switch(type) {
-    case WStype_DISCONNECTED:
-      Serial.println("[!] Deconectat");
-      break;
     case WStype_CONNECTED:
-      Serial.println("[V] Conectat");
+      Serial.println("[V] Canal Comenzi (8766) ACTIV");
       break;
-    case WStype_TEXT:
-      Serial.printf("[SERVER]: %s\n", payload);
+    case WStype_DISCONNECTED:
+      Serial.println("[!] Canal Comenzi (8766) OFFLINE");
       break;
-    case WStype_ERROR:
-      Serial.println("[X] Serverul nu raspunde pe acest port");
-      break;
+  }
+}
+
+void initWiFi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
   }
 }
 
 void setup() {
   Serial.begin(115200);
   delay(2000); 
-  Serial.println("\n\n=== SYSTEM ONLINE ===");
 
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
+  initWiFi();
+  
+  wsTelemetry.begin(host, port, "/");
+  wsTelemetry.onEvent(onTelemetryEvent);
+  wsTelemetry.setReconnectInterval(5000);
 
-  Serial.print("Conectare la WiFi ");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\n[WiFi] Conectat");
-  Serial.print("[WiFi] IP ESP32: ");
-  Serial.println(WiFi.localIP());
-
-  webSocket.begin(host, port, "/");
-  webSocket.onEvent(webSocketEvent);
-  webSocket.setReconnectInterval(5000);
+  wsCommands.begin(host, sendPort, "/");
+  wsCommands.onEvent(onCommandEvent);
+  wsCommands.setReconnectInterval(5000);
 }
 
 void loop() {
-  webSocket.loop();
+  wsTelemetry.loop();
+  wsCommands.loop();
+
+  if (Serial.available() > 0) {
+    String command = Serial.readStringUntil('\n');
+    command.trim();
+
+    if (command.length() > 0) {
+      wsCommands.sendTXT(command);
+    }
+  }
 }
