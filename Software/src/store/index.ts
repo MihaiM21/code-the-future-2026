@@ -67,6 +67,7 @@ interface ConfigState {
   autoFanEnabled: boolean;
   autoExhaustCleanupEnabled: boolean;
   autoBatteryAlertEnabled: boolean;
+  autoRpmAdvisoryEnabled: boolean;
   setAutonomyLevel: (n: AutonomyLevel) => void;
   setFanThreshold: (n: number) => void;
   setExhaustTempHigh: (n: number) => void;
@@ -75,6 +76,7 @@ interface ConfigState {
   toggleAutoFan: () => void;
   toggleAutoExhaustCleanup: () => void;
   toggleAutoBatteryAlert: () => void;
+  toggleAutoRpmAdvisory: () => void;
 }
 
 export const useConfigStore = create<ConfigState>((set) => ({
@@ -86,6 +88,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
   autoFanEnabled: true,
   autoExhaustCleanupEnabled: true,
   autoBatteryAlertEnabled: true,
+  autoRpmAdvisoryEnabled: true,
   setAutonomyLevel: (n) => set({ autonomyLevel: n }),
   setFanThreshold: (n) => set({ fanThreshold: n }),
   setExhaustTempHigh: (n) => set({ exhaustTempHigh: n }),
@@ -94,6 +97,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
   toggleAutoFan: () => set((s) => ({ autoFanEnabled: !s.autoFanEnabled })),
   toggleAutoExhaustCleanup: () => set((s) => ({ autoExhaustCleanupEnabled: !s.autoExhaustCleanupEnabled })),
   toggleAutoBatteryAlert: () => set((s) => ({ autoBatteryAlertEnabled: !s.autoBatteryAlertEnabled })),
+  toggleAutoRpmAdvisory: () => set((s) => ({ autoRpmAdvisoryEnabled: !s.autoRpmAdvisoryEnabled })),
 }));
 
 // ── Autonomy Queue ───────────────────────────────────────────
@@ -101,6 +105,8 @@ interface AutonomyState {
   actions: AutonomyAction[];
   addAction: (action: AutonomyAction) => void;
   updateAction: (id: string, patch: Partial<AutonomyAction>) => void;
+  removeAction: (id: string) => void;
+  setActions: (actions: AutonomyAction[]) => void;
 }
 
 export const useAutonomyStore = create<AutonomyState>((set) => ({
@@ -113,6 +119,11 @@ export const useAutonomyStore = create<AutonomyState>((set) => ({
     set((state) => ({
       actions: state.actions.map((action) => (action.id === id ? { ...action, ...patch } : action)),
     })),
+  removeAction: (id) =>
+    set((state) => ({
+      actions: state.actions.filter((action) => action.id !== id),
+    })),
+  setActions: (actions) => set({ actions }),
 }));
 
 // ── Lap Store ────────────────────────────────────────────────

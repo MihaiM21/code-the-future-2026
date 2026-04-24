@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useConfigStore, useAlertStore } from "../store";
 import { useTelemetryStore } from "../store";
 import { useAuthStore } from "../store/auth";
@@ -6,7 +7,7 @@ import AutonomyQueue from "../components/AutonomyQueue";
 import type { AutonomyLevel } from "../types";
 import {
   ShieldCheck, ShieldAlert, Sliders, Bell,
-  Wind, Zap, ChevronRight, Trash2, Lock
+  Wind, Zap, ChevronRight, Trash2, Lock, Check, X
 } from "lucide-react";
 
 const autonomyLabels: Array<{ level: AutonomyLevel; name: string; desc: string; color: string }> = [
@@ -69,7 +70,37 @@ function SafetyRules({ canDecide }: { canDecide: boolean }) {
     autoFanEnabled, toggleAutoFan,
     autoExhaustCleanupEnabled, toggleAutoExhaustCleanup,
     autoBatteryAlertEnabled, toggleAutoBatteryAlert,
+    autoRpmAdvisoryEnabled, toggleAutoRpmAdvisory,
   } = useConfigStore();
+
+  const [pending, setPending] = useState({ fanThreshold, exhaustTempHigh, batteryLowV, rpmLimit });
+
+  const isDirty =
+    pending.fanThreshold !== fanThreshold ||
+    pending.exhaustTempHigh !== exhaustTempHigh ||
+    pending.batteryLowV !== batteryLowV ||
+    pending.rpmLimit !== rpmLimit;
+
+  const handleAccept = async () => {
+    if (pending.fanThreshold !== fanThreshold) {
+      setFanThreshold(pending.fanThreshold);
+      await sendCommand(`SET_FAN_THRESHOLD:${pending.fanThreshold}`);
+    }
+    if (pending.exhaustTempHigh !== exhaustTempHigh) {
+      setExhaustTempHigh(pending.exhaustTempHigh);
+      await sendCommand(`SET_EXHAUST_TEMP:${pending.exhaustTempHigh}`);
+    }
+    if (pending.batteryLowV !== batteryLowV) {
+      setBatteryLowV(pending.batteryLowV);
+      await sendCommand(`SET_BATTERY_LOW_V:${pending.batteryLowV.toFixed(1)}`);
+    }
+    if (pending.rpmLimit !== rpmLimit) {
+      setRpmLimit(pending.rpmLimit);
+      await sendCommand(`SET_RPM_LIMIT:${pending.rpmLimit}`);
+    }
+  };
+
+  const handleDiscard = () => setPending({ fanThreshold, exhaustTempHigh, batteryLowV, rpmLimit });
 
   return (
     <div className="card">
@@ -89,12 +120,12 @@ function SafetyRules({ canDecide }: { canDecide: boolean }) {
           </div>
           <div className="flex items-center gap-2">
             <input
-              type="range" min={75} max={110} value={fanThreshold}
-              onChange={(e) => setFanThreshold(+e.target.value)}
-              className="range-input"
+              type="range" min={50} max={110} value={pending.fanThreshold}
+              onChange={(e) => setPending((p) => ({ ...p, fanThreshold: +e.target.value }))}
+              className="range-input w-[180px] md:w-[260px]"
               disabled={!canDecide}
             />
-            <span className="mono min-w-12 text-right text-[0.8rem] text-[var(--text-secondary)]">{fanThreshold}°C</span>
+            <span className="mono min-w-12 text-right text-[0.8rem] text-[var(--text-secondary)]">{pending.fanThreshold}°C</span>
             <button
               className={`rounded-full border px-2.5 py-1 text-[0.7rem] font-bold tracking-[0.05em] ${autoFanEnabled ? "border-[#06d6a04d] bg-[var(--accent-green-dim)] text-[var(--accent-green)]" : "border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-muted)]"} ${!canDecide ? "cursor-not-allowed opacity-65" : ""}`}
               onClick={toggleAutoFan}
@@ -117,12 +148,12 @@ function SafetyRules({ canDecide }: { canDecide: boolean }) {
           </div>
           <div className="flex items-center gap-2">
             <input
-              type="range" min={10} max={14} step={0.1} value={batteryLowV}
-              onChange={(e) => setBatteryLowV(+e.target.value)}
-              className="range-input"
+              type="range" min={10} max={14} step={0.1} value={pending.batteryLowV}
+              onChange={(e) => setPending((p) => ({ ...p, batteryLowV: +e.target.value }))}
+              className="range-input w-[180px] md:w-[260px]"
               disabled={!canDecide}
             />
-            <span className="mono min-w-12 text-right text-[0.8rem] text-[var(--text-secondary)]">{batteryLowV.toFixed(1)}V</span>
+            <span className="mono min-w-12 text-right text-[0.8rem] text-[var(--text-secondary)]">{pending.batteryLowV.toFixed(1)}V</span>
             <button
               className={`rounded-full border px-2.5 py-1 text-[0.7rem] font-bold tracking-[0.05em] ${autoBatteryAlertEnabled ? "border-[#06d6a04d] bg-[var(--accent-green-dim)] text-[var(--accent-green)]" : "border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-muted)]"} ${!canDecide ? "cursor-not-allowed opacity-65" : ""}`}
               onClick={toggleAutoBatteryAlert}
@@ -145,12 +176,12 @@ function SafetyRules({ canDecide }: { canDecide: boolean }) {
           </div>
           <div className="flex items-center gap-2">
             <input
-              type="range" min={450} max={900} step={10} value={exhaustTempHigh}
-              onChange={(e) => setExhaustTempHigh(+e.target.value)}
-              className="range-input"
+              type="range" min={450} max={900} step={10} value={pending.exhaustTempHigh}
+              onChange={(e) => setPending((p) => ({ ...p, exhaustTempHigh: +e.target.value }))}
+              className="range-input w-[180px] md:w-[260px]"
               disabled={!canDecide}
             />
-            <span className="mono min-w-12 text-right text-[0.8rem] text-[var(--text-secondary)]">{exhaustTempHigh}°C</span>
+            <span className="mono min-w-12 text-right text-[0.8rem] text-[var(--text-secondary)]">{pending.exhaustTempHigh}°C</span>
             <button
               className={`rounded-full border px-2.5 py-1 text-[0.7rem] font-bold tracking-[0.05em] ${autoExhaustCleanupEnabled ? "border-[#06d6a04d] bg-[var(--accent-green-dim)] text-[var(--accent-green)]" : "border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-muted)]"} ${!canDecide ? "cursor-not-allowed opacity-65" : ""}`}
               onClick={toggleAutoExhaustCleanup}
@@ -173,14 +204,43 @@ function SafetyRules({ canDecide }: { canDecide: boolean }) {
           </div>
           <div className="flex items-center gap-2">
             <input
-              type="range" min={6000} max={12000} step={100} value={rpmLimit}
-              onChange={(e) => setRpmLimit(+e.target.value)}
-              className="range-input"
+              type="range" min={6000} max={12000} step={100} value={pending.rpmLimit}
+              onChange={(e) => setPending((p) => ({ ...p, rpmLimit: +e.target.value }))}
+              className="range-input w-[180px] md:w-[260px]"
               disabled={!canDecide}
             />
-            <span className="mono min-w-12 text-right text-[0.8rem] text-[var(--text-secondary)]">{rpmLimit.toLocaleString()}</span>
+            <span className="mono min-w-12 text-right text-[0.8rem] text-[var(--text-secondary)]">{pending.rpmLimit.toLocaleString()}</span>
+            <button
+              className={`rounded-full border px-2.5 py-1 text-[0.7rem] font-bold tracking-[0.05em] ${autoRpmAdvisoryEnabled ? "border-[#06d6a04d] bg-[var(--accent-green-dim)] text-[var(--accent-green)]" : "border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-muted)]"} ${!canDecide ? "cursor-not-allowed opacity-65" : ""}`}
+              onClick={toggleAutoRpmAdvisory}
+              disabled={!canDecide}
+            >
+              {autoRpmAdvisoryEnabled ? "ON" : "OFF"}
+            </button>
           </div>
         </div>
+
+        {isDirty && (
+          <>
+            <div className="my-1 h-px bg-[var(--border)]" />
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                className={`flex items-center gap-1.5 rounded-[8px] border border-[var(--border)] bg-[var(--bg-card)] px-3 py-1.5 text-[0.78rem] font-semibold text-[var(--text-muted)] transition-all hover:bg-white/[0.04] ${!canDecide ? "cursor-not-allowed opacity-65" : ""}`}
+                onClick={handleDiscard}
+                disabled={!canDecide}
+              >
+                <X size={13} /> Discard
+              </button>
+              <button
+                className={`flex items-center gap-1.5 rounded-[8px] border border-[#06d6a04d] bg-[var(--accent-green-dim)] px-3 py-1.5 text-[0.78rem] font-semibold text-[var(--accent-green)] transition-all hover:bg-[#06d6a020] ${!canDecide ? "cursor-not-allowed opacity-65" : ""}`}
+                onClick={handleAccept}
+                disabled={!canDecide}
+              >
+                <Check size={13} /> Accept Changes
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -273,7 +333,6 @@ export default function Safety() {
           <AutonomySelector canDecide={isAuthorized} />
           <SafetyRules canDecide={isAuthorized} />
           <AutonomyQueue />
-          <ManualOverride canDecide={isAuthorized} />
         </div>
         <div className="flex min-h-0 flex-col gap-3.5">
           <AlertLog />

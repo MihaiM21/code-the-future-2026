@@ -6,6 +6,7 @@ import Dashboard from "./pages/Dashboard";
 import Safety from "./pages/Safety";
 import CanBus from "./pages/CanBus";
 import Sessions from "./pages/Sessions";
+import AutonomyCommands from "./pages/AutonomyCommands";
 import Settings from "./pages/Settings";
 import type { Page } from "./types";
 import { useSerialStore } from "./store";
@@ -17,6 +18,7 @@ const PAGE_TITLES: Record<Page, string> = {
   safety: "Safety & Autonomy",
   can: "CAN Bus Monitor",
   laps: "Session Analytics",
+  autonomy: "Autonomy Commands",
   settings: "Connection Settings",
 };
 
@@ -80,6 +82,7 @@ function App() {
         {page === "safety"    && <Safety />}
         {page === "can"       && <CanBus />}
         {page === "laps"      && <Sessions />}
+        {page === "autonomy"  && <AutonomyCommands />}
         {page === "settings"  && <Settings />}
       </main>
     </div>
